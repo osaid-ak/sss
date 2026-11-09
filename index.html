@@ -459,7 +459,8 @@
   .who-person.q-line button { color: var(--lineq); }
   .who-person.q-both button { color: var(--both); }
   .who-person.off button,
-  .who-off {
+  .who-off,
+  .person-line.off {
     color: var(--gap); font-weight: 700;
     text-decoration: line-through; text-decoration-thickness: 1.5px;
     text-decoration-color: var(--gap);
@@ -860,6 +861,7 @@
   const ROLE_KEYS = ["lead", "phase1", "vip", "line"];
   const ROLE_LABEL = { lead: "Lead", phase1: "Phase 1", vip: "VIP", line: "Support Line" };
   const FILTER_KEY = "coverage-calendar-filters";
+  const DEFAULT_ROLE_FILTERS = ["phase1", "vip", "line"];
   const SHOW_CLOSED_KEY = "coverage-calendar-show-closed";
   let Q_COLOR = THEME_Q.night;
   const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -1345,7 +1347,7 @@
     leaveTab: "pending",
     leaveMonth: "",
     peopleFilter: new Set(),
-    queueFilters: new Set(),
+    queueFilters: new Set(DEFAULT_ROLE_FILTERS),
     roleMenuOpen: false,
     peopleMenuOpen: false,
     theme: "night",
@@ -3023,6 +3025,10 @@
 
   function hasPeopleFilter() { return ui.peopleFilter.size > 0; }
   function hasQueueFilter() { return ui.queueFilters.size > 0; }
+  function roleFilterIsDefault() {
+    return ui.queueFilters.size === DEFAULT_ROLE_FILTERS.length && DEFAULT_ROLE_FILTERS.every(q => ui.queueFilters.has(q));
+  }
+  function resetRoleFilters() { ui.queueFilters = new Set(DEFAULT_ROLE_FILTERS); }
   function hasActiveFilter() { return hasPeopleFilter() || hasQueueFilter(); }
   function onLine(day, name) { return day.lineBars.some(b => b.owner === name); }
   function matchesQueue(p, day, q) {
@@ -3045,7 +3051,7 @@
   function dayShowsUnderFilter(key) {
     if (!hasActiveFilter()) return true;
     if (isClosedDay(key)) return false;
-    return scheduledUnderFilter(resolveDay(key)).length > 0;
+    return visiblePeople(resolveDay(key)).length > 0;
   }
   function coverageStripKeys() {
     const keys = ["phase1", "vip", "line"];
@@ -3572,11 +3578,17 @@
     if (isClosedDay(key)) return `<div class="closed-label">OFF · floor closed</div>`;
     if (hasActiveFilter()) {
       if (!dayShowsUnderFilter(key)) return "";
-      const scheduled = scheduledUnderFilter(resolveDay(key));
+      const day = resolveDay(key);
+      const people = visiblePeople(day).slice().sort((a, b) => {
+        const ao = day.away.has(a.name) ? 1 : 0;
+        const bo = day.away.has(b.name) ? 1 : 0;
+        if (ao !== bo) return ao - bo;
+        return a.name.localeCompare(b.name);
+      });
       const cover = weekendCoverOf(key);
       let html = cover ? `<div class="weekend-tag">Weekend cover</div>` : "";
-      html += scheduled.map(p =>
-        `<div class="person-line">${esc(p.name)} · ${esc(hoursLabel(p))}</div>`
+      html += people.map(p =>
+        `<div class="person-line${day.away.has(p.name) ? " off" : ""}">${esc(p.name)} · ${esc(hoursLabel(p))}</div>`
       ).join("");
       return html;
     }
@@ -3721,7 +3733,7 @@
           </button>
           <div class="filter-menu${ui.roleMenuOpen ? "" : " hidden"}" id="roleMenu">
             ${roleItems}
-            ${hasQueueFilter() ? `<div class="filter-menu-foot"><button type="button" class="clear-filter" id="clearRoles">Clear roles</button></div>` : ""}
+            ${roleFilterIsDefault() ? "" : `<div class="filter-menu-foot"><button type="button" class="clear-filter" id="clearRoles">Clear roles</button></div>`}
           </div>
         </div>
         <div class="filter-dd" id="peopleDd">
@@ -3736,7 +3748,7 @@
           </div>
         </div>
         <span class="filter-summary">${shortDate(ui.cursor)}${day.closed ? " · floor closed" : ` · <b>${nPhase}</b> Phase 1 · <b>${nVip}</b> VIP · <b>${nLine}</b> Line`}</span>
-        ${hasActiveFilter() ? `<button type="button" class="clear-filter" id="clearFilters">Clear filters</button>` : ""}
+        ${hasPeopleFilter() || !roleFilterIsDefault() ? `<button type="button" class="clear-filter" id="clearFilters">Clear filters</button>` : ""}
       </div>`;
     document.getElementById("roleToggle").addEventListener("click", e => {
       e.stopPropagation();
@@ -3761,7 +3773,7 @@
     });
     const clearRoles = pane.querySelector("#clearRoles");
     if (clearRoles) clearRoles.addEventListener("click", () => {
-      ui.queueFilters.clear();
+      resetRoleFilters();
       ui.roleMenuOpen = true;
       render();
     });
@@ -3774,7 +3786,7 @@
     const clear = pane.querySelector("#clearFilters");
     if (clear) clear.addEventListener("click", () => {
       ui.peopleFilter.clear();
-      ui.queueFilters.clear();
+      resetRoleFilters();
       ui.roleMenuOpen = false;
       ui.peopleMenuOpen = false;
       render();
@@ -3848,6 +3860,9 @@
     const rank = { lead: 0, vip: 1, phase: 2, both: 3, line: 4 };
     const people = shown.slice().sort((a, b) => {
       if (a.start !== b.start) return a.start - b.start;
+      const ao = away.has(a.name) ? 1 : 0;
+      const bo = away.has(b.name) ? 1 : 0;
+      if (ao !== bo) return ao - bo;
       const d = (rank[weekTone(a)] || 0) - (rank[weekTone(b)] || 0);
       return d || a.name.localeCompare(b.name);
     });
@@ -3857,7 +3872,9 @@
       const start = people[i].start;
       let j = i + 1;
       while (j < people.length && people[j].start === start) j++;
-      html += `<div class="who-time"><span>${esc(slotLabel(start))}</span><span>${j - i}</span></div>`;
+      let on = 0;
+      for (let k = i; k < j; k++) if (!away.has(people[k].name)) on++;
+      html += `<div class="who-time"><span>${esc(slotLabel(start))}</span><span>${on}</span></div>`;
       for (; i < j; i++) {
         const p = people[i];
         const off = away.has(p.name);
@@ -3871,14 +3888,22 @@
     const names = new Set(shown.map(p => p.name));
     const bars = (day.lineBars || []).filter(b => names.has(b.owner));
     if (!bars.length) return "";
-    bars.sort((a, b) => a.start - b.start || a.len - b.len || a.owner.localeCompare(b.owner));
+    bars.sort((a, b) => {
+      if (a.start !== b.start) return a.start - b.start;
+      const ao = day.away.has(a.owner) ? 1 : 0;
+      const bo = day.away.has(b.owner) ? 1 : 0;
+      if (ao !== bo) return ao - bo;
+      return a.len - b.len || a.owner.localeCompare(b.owner);
+    });
     let html = `<div class="who-line"><div class="who-line-head">Support Line</div>`;
     let i = 0;
     while (i < bars.length) {
       const start = bars[i].start;
       let j = i + 1;
       while (j < bars.length && bars[j].start === start) j++;
-      html += `<div class="who-time"><span>${esc(slotLabel(start))}</span><span>${j - i}</span></div>`;
+      let on = 0;
+      for (let k = i; k < j; k++) if (!day.away.has(bars[k].owner)) on++;
+      html += `<div class="who-time"><span>${esc(slotLabel(start))}</span><span>${on}</span></div>`;
       for (; i < j; i++) {
         const off = day.away.has(bars[i].owner);
         html += `<div class="who-person ${off ? "off" : "q-line"}"><button type="button" data-filter-name="${esc(bars[i].owner)}">${esc(bars[i].owner)}</button></div>`;
@@ -3898,7 +3923,7 @@
       const day = resolveDay(key);
       const hit = dayShowsUnderFilter(key);
       const dim = hasActiveFilter() && !hit;
-      const shown = dim ? [] : (hasActiveFilter() ? scheduledUnderFilter(day) : visiblePeople(day));
+      const shown = dim ? [] : visiblePeople(day);
       const who = cov.closed
         ? `<div class="closed-label">OFF · floor closed</div>`
         : dim ? ""
