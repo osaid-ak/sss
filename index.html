@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
 <title>Support Shift Schedule (SSS)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -711,6 +713,7 @@
   .tabs button.on { background: var(--chip-on); color: var(--chip-on-ink); border-color: var(--chip-on); }
   .badge { background: var(--gap); color: #fff; border-radius: 999px; font-size: 10px; padding: 1px 6px; margin-left: 4px; }
   .hidden { display: none !important; }
+  .pin-err { color: var(--gap); font-size: 13px; font-weight: 600; margin: 8px 0 0; }
   @media (max-width: 900px) {
     .month-grid, .week-grid,
     .month-grid.hide-closed, .week-grid.hide-closed { grid-template-columns: 1fr; }
@@ -783,6 +786,7 @@
 (function () {
   const STORAGE_KEY = "coverage-calendar-v1";
   const THEME_KEY = "coverage-calendar-theme";
+  const LEAD_PIN = "Theleads";
   const WEEKEND_SHEET_ID = "1k-2i2LNA_tnsEQVghJvVH7F16-8C8HxvUFwIe3RZ7IM";
   const WEEKEND_SHEET_GID = 1806071421;
   const WEEKEND_COVER_API = "";
@@ -1001,7 +1005,7 @@
     return {
       version: 1,
       slotOrigin: START_MIN,
-      pin: "Theleads",
+      pin: LEAD_PIN,
       people: clone(DEFAULT_PEOPLE),
       lineBars: clone(DEFAULT_LINE),
       leaves: [],
@@ -1257,12 +1261,17 @@
     oooSeed: null
   };
   let data = load();
+  data.pin = LEAD_PIN;
   (data.holidays || []).forEach(plan => {
     if (plan.status !== "confirmed") cancelAllPlannerPto(plan);
   });
 
   function persist() {
+    data.pin = LEAD_PIN;
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (_) {}
+  }
+  function pinMatches(value) {
+    return String(value || "").replace(/\s+/g, "").toLowerCase() === LEAD_PIN.replace(/\s+/g, "").toLowerCase();
   }
 
   function sanitizeWeekendCover(raw) {
@@ -4345,7 +4354,8 @@
     if (kind === "pin") {
       box.innerHTML = `<h2>Lead access</h2>
         <p>Review, export, and schedule edits stay behind this PIN.</p>
-        <label>PIN</label><input id="pinIn" type="password" autocomplete="off">
+        <label>PIN</label><input id="pinIn" type="password" name="sss-lead-pin" autocomplete="new-password" spellcheck="false">
+        <p class="pin-err hidden" id="pinErr">That PIN is not right.</p>
         <div class="modal-actions">
           <button type="button" class="ghost" id="mCancel">Cancel</button>
           <button type="button" class="primary" id="mOk">Unlock</button>
@@ -4497,7 +4507,8 @@
       const input = box.querySelector("#pinIn");
       input.focus();
       const go = () => {
-        if (input.value === data.pin) {
+        const err = box.querySelector("#pinErr");
+        if (pinMatches(input.value)) {
           ui.leadAccess = true;
           const next = ui.afterPin;
           ui.afterPin = null;
@@ -4515,7 +4526,11 @@
             ui.editing = true;
             render();
           }
-        } else input.style.borderColor = "var(--gap)";
+        } else {
+          input.style.borderColor = "var(--gap)";
+          if (err) err.classList.remove("hidden");
+          input.select();
+        }
       };
       ok.addEventListener("click", go);
       input.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
