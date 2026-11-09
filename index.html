@@ -27,6 +27,7 @@
     --both-soft: rgba(192, 132, 252, 0.16);
     --lineq: #6ea8ff;
     --lineq-soft: rgba(110, 168, 255, 0.16);
+    --lead: #94a3b8;
     --brk: #3d4554;
     --gap: #ff5c7a;
     --gap-bg: rgba(255, 92, 122, 0.14);
@@ -65,6 +66,7 @@
     --both-soft: rgba(75, 63, 154, 0.12);
     --lineq: #1d5aa6;
     --lineq-soft: rgba(29, 90, 166, 0.12);
+    --lead: #3d5a73;
     --brk: #b9c9d6;
     --gap: #b42318;
     --gap-bg: rgba(180, 35, 24, 0.08);
@@ -311,8 +313,8 @@
   }
   .day-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .who button {
-    border: 0; background: none; padding: 0; color: inherit; font: inherit;
-    text-decoration: underline; text-underline-offset: 2px;
+    border: 0; background: none; padding: 0; color: inherit; font: inherit; font-weight: 700;
+    text-decoration: none;
   }
   .person-line { font-size: 11px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .qswitch { display: flex; gap: 3px; margin-left: 0; }
@@ -432,16 +434,23 @@
   .week-col.thin { background: var(--thin-bg); }
   .week-col h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
   .week-col h3 b { display: block; font-family: var(--serif); font-size: 22px; color: var(--ink); font-weight: 600; }
-  .who { font-size: 12px; margin-top: 8px; color: var(--ink); }
-  .who ul { list-style: none; margin: 0; padding: 0; }
-  .who li { margin: 0 0 3px; }
-  .who-sec { margin-top: 10px; }
-  .who-sec:first-child { margin-top: 10px; }
-  .who-sec-title {
-    font-size: 10px; font-weight: 700; letter-spacing: 0.07em;
-    text-transform: uppercase; color: var(--muted); margin: 0 0 4px;
+  .who { font-size: 12px; margin-top: 4px; color: var(--ink); }
+  .who-time {
+    margin: 8px 0 2px; font-size: 11px; font-weight: 700; color: var(--muted);
   }
-  .who-off { color: var(--gap); font-weight: 700; }
+  .who-person { margin: 0 0 2px; line-height: 1.35; }
+  .who-person.q-lead button { color: var(--lead); }
+  .who-person.q-vip button { color: var(--vip); }
+  .who-person.q-phase button { color: var(--phase); }
+  .who-person.q-line button { color: var(--lineq); }
+  .who-person.q-both button { color: var(--both); }
+  .who-person.off button,
+  .who-off {
+    color: var(--faint); font-weight: 700;
+    text-decoration: line-through; text-decoration-thickness: 1.5px;
+  }
+  .day-offs { display: flex; flex-wrap: wrap; gap: 2px 8px; margin-top: 2px; }
+  .day-offs .who-off { font-size: 11px; }
 
   .day-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: end; margin-bottom: 12px; }
   .day-head h2 { margin: 0; font-family: var(--serif); font-size: 26px; letter-spacing: -0.03em; }
@@ -1230,9 +1239,13 @@
     } catch (_) { return null; }
   }
 
+  let snapshotUi = null;
   function load() {
     const embedded = loadEmbedded();
-    if (embedded) return sanitizeData(embedded);
+    if (embedded) {
+      snapshotUi = embedded.ui || null;
+      return sanitizeData(embedded);
+    }
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) return sanitizeData(JSON.parse(raw));
@@ -3229,8 +3242,25 @@
       if (cover.status) html += `<div class="leave-names">${esc(cover.status)}</div>`;
       return html;
     }
-    const allOff = leavesOn(key);
-    return allOff.length ? `<div class="leave-names">${allOff.map(l => l.name + " off").join(" · ")}</div>` : "";
+    return monthOffHtml(key);
+  }
+  function monthOffHtml(key) {
+    const items = [];
+    const seen = new Set();
+    data.people.forEach(p => {
+      const mark = holidayMark(p.name, key);
+      if (mark !== "off" && mark !== "pto" && !onLeave(p.name, key)) return;
+      if (seen.has(p.name)) return;
+      seen.add(p.name);
+      items.push(p.name);
+    });
+    leavesOn(key).forEach(l => {
+      if (seen.has(l.name)) return;
+      seen.add(l.name);
+      items.push(l.name);
+    });
+    if (!items.length) return "";
+    return `<div class="day-offs">${items.map(name => `<span class="who-off">${esc(name)}</span>`).join("")}</div>`;
   }
   function esc(s) {
     return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[c]));
@@ -3451,27 +3481,35 @@
     return html + "</div>";
   }
 
+  function weekTone(p) {
+    const r = rolesOf(p);
+    if (r.lead) return "lead";
+    if (r.line && !r.phase1 && !r.vip) return "line";
+    if (r.phase1 && r.vip) return "both";
+    if (r.vip) return "vip";
+    if (r.phase1) return "phase";
+    if (r.line) return "line";
+    return "lead";
+  }
   function weekWhoHtml(day, shown) {
     const away = day.away;
-    const sections = [
-      { title: "Leads", people: shown.filter(p => rolesOf(p).lead) },
-      { title: "Phase 1", people: shown.filter(p => rolesOf(p).phase1 && !rolesOf(p).lead) },
-      { title: "VIP", people: shown.filter(p => rolesOf(p).vip && !rolesOf(p).lead) },
-      { title: "Line", people: shown.filter(p => rolesOf(p).line || onLine(day, p.name)) }
-    ];
-    const body = sections.map(sec => {
-      if (!sec.people.length) return "";
-      const rows = sec.people.slice().sort((a, b) => {
-        const ao = away.has(a.name) ? 0 : 1;
-        const bo = away.has(b.name) ? 0 : 1;
-        return ao !== bo ? ao - bo : a.name.localeCompare(b.name);
-      }).map(p => {
-        if (away.has(p.name)) return `<li class="who-off">${esc(p.name)} off</li>`;
-        return `<li><button type="button" data-filter-name="${esc(p.name)}">${esc(p.name)}</button></li>`;
-      }).join("");
-      return `<div class="who-sec"><div class="who-sec-title">${esc(sec.title)}</div><ul>${rows}</ul></div>`;
-    }).join("");
-    return `<div class="who">${body}</div>`;
+    const rank = { lead: 0, vip: 1, phase: 2, both: 3, line: 4 };
+    const people = shown.slice().sort((a, b) => {
+      if (a.start !== b.start) return a.start - b.start;
+      const d = (rank[weekTone(a)] || 0) - (rank[weekTone(b)] || 0);
+      return d || a.name.localeCompare(b.name);
+    });
+    let html = "";
+    let last = null;
+    people.forEach(p => {
+      if (p.start !== last) {
+        html += `<div class="who-time">${esc(slotLabel(p.start))}</div>`;
+        last = p.start;
+      }
+      const off = away.has(p.name);
+      html += `<div class="who-person ${off ? "off" : "q-" + weekTone(p)}"><button type="button" data-filter-name="${esc(p.name)}">${esc(p.name)}</button></div>`;
+    });
+    return `<div class="who">${html}</div>`;
   }
   function renderWeek() {
     const start = mondayOf(ui.cursor);
@@ -5251,15 +5289,62 @@
     URL.revokeObjectURL(a.href);
   }
 
+  function snapshotUiState() {
+    return {
+      view: ui.view,
+      fromView: ui.fromView || ui.view,
+      cursor: dateKey(ui.cursor),
+      editing: !!ui.editing,
+      modal: ui.modal && ui.modal !== "pin" ? ui.modal : null,
+      underModal: ui.underModal,
+      leaveName: ui.leaveName,
+      holidayId: ui.holidayId,
+      holidayDate: ui.holidayDate,
+      oooSeed: ui.oooSeed,
+      showClosed: ui.showClosed,
+      theme: ui.theme,
+      peopleFilter: [...ui.peopleFilter],
+      queueFilters: [...ui.queueFilters],
+      hoursScope: ui.hoursScope,
+      hoursMonth: ui.hoursMonth
+    };
+  }
+  function applySnapshotUi() {
+    const s = snapshotUi;
+    if (!s || typeof s !== "object") return;
+    const views = ["year", "month", "week", "day"];
+    if (views.indexOf(s.view) >= 0) ui.view = s.view;
+    if (views.indexOf(s.fromView) >= 0) ui.fromView = s.fromView;
+    if (typeof s.cursor === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.cursor)) ui.cursor = parseKey(s.cursor);
+    ui.editing = !!s.editing;
+    if (typeof s.holidayId === "string") ui.holidayId = s.holidayId;
+    if (typeof s.holidayDate === "string") ui.holidayDate = s.holidayDate;
+    if (typeof s.showClosed === "boolean") ui.showClosed = s.showClosed;
+    if (s.theme) applyTheme(s.theme);
+    if (Array.isArray(s.peopleFilter)) ui.peopleFilter = new Set(s.peopleFilter.map(String));
+    if (Array.isArray(s.queueFilters)) ui.queueFilters = new Set(s.queueFilters.map(String));
+    if (s.hoursScope === "month" || s.hoursScope === "all") ui.hoursScope = s.hoursScope;
+    if (typeof s.hoursMonth === "string") ui.hoursMonth = s.hoursMonth;
+    const modals = ["holiday", "roster", "review", "ooo"];
+    if (modals.indexOf(s.modal) >= 0) {
+      ui.modal = s.modal;
+      ui.leadAccess = true;
+    }
+    if (s.underModal === "holiday") ui.underModal = "holiday";
+    if (typeof s.leaveName === "string") ui.leaveName = s.leaveName;
+    if (s.oooSeed && typeof s.oooSeed === "object") ui.oooSeed = s.oooSeed;
+    if (ui.editing) ui.leadAccess = true;
+  }
   function saveSnapshot() {
-    const json = JSON.stringify(data).replace(/</g, "\\u003c");
-    const open = "<script id=\"coverage-snapshot\" type=\"application/json\">";
-    const close = "<" + "/script>";
-    const html = document.documentElement.outerHTML.replace(
-      new RegExp(open + "[\\s\\S]*?" + close),
-      open + json + close
-    );
-    download("coverage-calendar.html", "<!DOCTYPE html>\n" + html, "text/html");
+    const payload = JSON.parse(JSON.stringify(data));
+    payload.ui = snapshotUiState();
+    const json = JSON.stringify(payload).replace(/</g, "\\u003c");
+    const root = document.documentElement.cloneNode(true);
+    root.querySelectorAll(".modal-bg").forEach(el => el.remove());
+    const snap = root.querySelector("#coverage-snapshot");
+    if (snap) snap.textContent = json;
+    const viewName = ui.view === "day" ? "day" : ui.view === "month" ? "month" : ui.view === "year" ? "year" : "week";
+    download("shift-plan-" + viewName + "-" + dateKey(ui.cursor) + ".html", "<!DOCTYPE html>\n" + root.outerHTML, "text/html");
   }
 
   document.getElementById("viewTabs").addEventListener("click", e => {
@@ -5311,6 +5396,7 @@
   }
 
   applyTheme((function () { try { return localStorage.getItem(THEME_KEY); } catch (_) { return "night"; } })());
+  applySnapshotUi();
 
   document.getElementById("editBtn").addEventListener("click", () => {
     ui.editing = !ui.editing;
@@ -5405,6 +5491,7 @@
     }
   });
 
+  applySnapshotUi();
   render();
   startWeekendAutoSync();
 })();
