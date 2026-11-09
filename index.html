@@ -194,6 +194,9 @@
   .appbar-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .brand { font-family: var(--serif); font-size: 22px; font-weight: 800; letter-spacing: -0.04em; margin: 0; }
   .brand span { color: var(--muted); font-weight: 500; font-size: 13px; margin-left: 10px; font-family: var(--sans); }
+  .team-live { align-self: center; font-size: 11px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+  .team-live.ok { color: var(--ok); }
+  .team-live.wait { color: var(--vip); }
   .views { display: flex; background: var(--paper); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; padding: 3px; }
   .views button {
     border: 0; background: transparent; padding: 4px 10px; color: var(--muted); border-radius: 999px; font-weight: 600; font-size: 12px;
@@ -740,6 +743,7 @@
   <header class="appbar">
     <div class="appbar-row">
       <h1 class="brand">Shift Plan<span>SSS</span></h1>
+      <span class="team-live" id="teamLive">Connecting</span>
       <div class="views" id="viewTabs">
         <button data-view="year">Year</button>
         <button data-view="month">Month</button>
@@ -795,6 +799,7 @@
 <script>
 (function () {
   const STORAGE_KEY = "coverage-calendar-v1";
+  const TEAM_BASE = "https://crudcrud.com/api/6ecf9d8391d546b7976fbca2b37e0ef7/plan";
   const THEME_KEY = "coverage-calendar-theme";
   const LEAD_PIN = "Theleads";
   const WEEKEND_SHEET_ID = "1k-2i2LNA_tnsEQVghJvVH7F16-8C8HxvUFwIe3RZ7IM";
@@ -1227,6 +1232,7 @@
     Object.keys(d.days).forEach(k => {
       if (isSaturday(k) && !(d.days[k] && d.days[k].weekendCover)) delete d.days[k];
     });
+    d.updatedAt = typeof raw.updatedAt === "string" ? raw.updatedAt : "";
     return d;
   }
 
@@ -1240,6 +1246,8 @@
   }
 
   let snapshotUi = null;
+  let hadLocalPlan = false;
+  let openedFromSnapshot = false;
   function load() {
     const embedded = loadEmbedded();
     if (embedded) {
@@ -1248,7 +1256,10 @@
     }
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) return sanitizeData(JSON.parse(raw));
+      if (raw) {
+        hadLocalPlan = true;
+        return sanitizeData(JSON.parse(raw));
+      }
     } catch (_) {}
     return defaultData();
   }
@@ -1283,14 +1294,150 @@
     oooSeed: null
   };
   let data = load();
+  openedFromSnapshot = !!snapshotUi;
   data.pin = LEAD_PIN;
   (data.holidays || []).forEach(plan => {
     if (plan.status !== "confirmed") cancelAllPlannerPto(plan);
   });
 
-  function persist() {
+  let teamQuiet = false;
+  let teamPending = null;
+  let teamTimer = 0;
+  let teamPushing = false;
+  let teamQueued = false;
+  function setTeamStatus(text, kind) {
+    const el = document.getElementById("teamLive");
+    if (!el) return;
+    el.textContent = text;
+    el.className = "team-live" + (kind ? " " + kind : "");
+  }
+  function writeLocalPlan() {
     data.pin = LEAD_PIN;
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (_) {}
+  }
+  function teamBody() {
+    const calendar = JSON.parse(JSON.stringify(data));
+    delete calendar.pin;
+    return { version: 1, updatedAt: data.updatedAt || "", calendar: JSON.stringify(calendar) };
+  }
+  function newestTeam(list) {
+    if (!Array.isArray(list) || !list.length) return null;
+    return list.slice().sort((a, b) => String(a.updatedAt || "").localeCompare(String(b.updatedAt || ""))).pop();
+  }
+  function scheduleTeamPush() {
+    if (openedFromSnapshot) return;
+    clearTimeout(teamTimer);
+    teamTimer = setTimeout(() => { teamTimer = 0; pushTeam(); }, 700);
+  }
+  function applyTeamDoc(doc) {
+    let calendar = doc.calendar;
+    if (typeof calendar === "string") {
+      try { calendar = JSON.parse(calendar); } catch (_) { return; }
+    }
+    if (!calendar || typeof calendar !== "object") return;
+    teamPending = null;
+    teamQuiet = true;
+    data = sanitizeData(calendar);
+    data.pin = LEAD_PIN;
+    data.updatedAt = doc.updatedAt || "";
+    writeLocalPlan();
+    teamQuiet = false;
+    setTeamStatus("Live with the team", "ok");
+    render();
+  }
+  function considerTeam(doc) {
+    if (!doc || !doc.updatedAt || !doc.calendar) return;
+    const remoteAt = String(doc.updatedAt);
+    const localAt = String(data.updatedAt || "");
+    if (remoteAt === localAt) {
+      setTeamStatus("Live with the team", "ok");
+      return;
+    }
+    if (remoteAt < localAt) {
+      scheduleTeamPush();
+      return;
+    }
+    if (ui.modal || ui.editing || teamTimer || teamPushing) {
+      teamPending = doc;
+      setTeamStatus("Teammate update waiting", "wait");
+      return;
+    }
+    applyTeamDoc(doc);
+  }
+  async function pushTeamOnce() {
+    const listed = await fetch(TEAM_BASE, { cache: "no-store" });
+    if (!listed.ok) throw new Error("team read failed");
+    const remote = newestTeam(await listed.json());
+    if (remote && remote.updatedAt && remote.updatedAt > (data.updatedAt || "")) {
+      considerTeam(remote);
+      return;
+    }
+    const body = JSON.stringify(teamBody());
+    const res = remote && remote._id
+      ? await fetch(TEAM_BASE + "/" + remote._id, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body
+        })
+      : await fetch(TEAM_BASE, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body
+        });
+    if (!res.ok) throw new Error("team write failed");
+    setTeamStatus("Live with the team", "ok");
+  }
+  async function pushTeam() {
+    if (openedFromSnapshot) return;
+    if (teamPushing) { teamQueued = true; return; }
+    teamPushing = true;
+    try {
+      do {
+        teamQueued = false;
+        await pushTeamOnce();
+      } while (teamQueued);
+    } catch (_) {
+      setTeamStatus("Saved on this browser");
+    } finally {
+      teamPushing = false;
+    }
+  }
+  async function pullTeam() {
+    if (openedFromSnapshot) return;
+    const res = await fetch(TEAM_BASE, { cache: "no-store" });
+    if (!res.ok) throw new Error("team read failed");
+    const doc = newestTeam(await res.json());
+    if (!doc || !doc.calendar) {
+      if (hadLocalPlan || data.updatedAt) {
+        if (!data.updatedAt) {
+          data.updatedAt = new Date().toISOString();
+          writeLocalPlan();
+        }
+        scheduleTeamPush();
+      } else setTeamStatus("Waiting for the team", "wait");
+      return;
+    }
+    considerTeam(doc);
+  }
+  function startTeamSync() {
+    const run = () => pullTeam().catch(() => setTeamStatus("Saved on this browser"));
+    run();
+    setInterval(() => {
+      if (document.visibilityState === "visible") run();
+    }, 20000);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") run();
+    });
+  }
+  function persist() {
+    data.pin = LEAD_PIN;
+    if (!teamQuiet) {
+      data.updatedAt = new Date().toISOString();
+      teamPending = null;
+    }
+    if (openedFromSnapshot) return;
+    writeLocalPlan();
+    if (!teamQuiet) scheduleTeamPush();
   }
   function pinMatches(value) {
     return String(value || "").replace(/\s+/g, "").toLowerCase() === LEAD_PIN.replace(/\s+/g, "").toLowerCase();
@@ -1401,7 +1548,7 @@
       writeWeekendDay(key, next);
       changed += 1;
     });
-    persist();
+    if (changed) persist();
     return changed;
   }
   const weekendSync = { busy: false, last: "", error: "", timer: 0 };
@@ -3318,6 +3465,12 @@
   }
 
   function render() {
+    if (teamPending && !ui.modal && !ui.editing && !teamTimer && !teamPushing) {
+      const doc = teamPending;
+      teamPending = null;
+      applyTeamDoc(doc);
+      return;
+    }
     const nav = navParts();
     document.getElementById("navTitle").innerHTML =
       `<span class="nav-kicker">${esc(nav.kicker)}</span><strong>${esc(nav.title)}</strong>` +
@@ -5339,12 +5492,13 @@
     const payload = JSON.parse(JSON.stringify(data));
     payload.ui = snapshotUiState();
     const json = JSON.stringify(payload).replace(/</g, "\\u003c");
-    const root = document.documentElement.cloneNode(true);
-    root.querySelectorAll(".modal-bg").forEach(el => el.remove());
-    const snap = root.querySelector("#coverage-snapshot");
-    if (snap) snap.textContent = json;
+    const snapClose = "<" + "/script>";
+    const html = document.documentElement.outerHTML.replace(
+      new RegExp('<script id="coverage-snapshot" type="application/json">[\\s\\S]*?' + snapClose),
+      '<script id="coverage-snapshot" type="application/json">' + json + snapClose
+    );
     const viewName = ui.view === "day" ? "day" : ui.view === "month" ? "month" : ui.view === "year" ? "year" : "week";
-    download("shift-plan-" + viewName + "-" + dateKey(ui.cursor) + ".html", "<!DOCTYPE html>\n" + root.outerHTML, "text/html");
+    download("shift-plan-" + viewName + "-" + dateKey(ui.cursor) + ".html", "<!DOCTYPE html>\n" + html, "text/html");
   }
 
   document.getElementById("viewTabs").addEventListener("click", e => {
@@ -5493,6 +5647,8 @@
 
   applySnapshotUi();
   render();
+  if (openedFromSnapshot) setTeamStatus("Snapshot");
+  else startTeamSync();
   startWeekendAutoSync();
 })();
 </script>
