@@ -23,11 +23,14 @@
     --phase-soft: rgba(46, 230, 197, 0.16);
     --vip: #ffb020;
     --vip-soft: rgba(255, 176, 32, 0.16);
-    --both: #c084fc;
-    --both-soft: rgba(192, 132, 252, 0.16);
-    --lineq: #6ea8ff;
-    --lineq-soft: rgba(110, 168, 255, 0.16);
-    --lead: #94a3b8;
+    --both: #e879f9;
+    --both-soft: rgba(232, 121, 249, 0.18);
+    --lineq: #62b4ff;
+    --lineq-soft: rgba(98, 180, 255, 0.18);
+    --lead: #ffbe7a;
+    --time-ink: #f7fbff;
+    --time-bg: #2c3b52;
+    --time-mark: #f6d36b;
     --brk: #3d4554;
     --gap: #ff5c7a;
     --gap-bg: rgba(255, 92, 122, 0.14);
@@ -58,15 +61,18 @@
     --paper: #f7fbfe;
     --canvas: #e4eef6;
     --rail: #d7e6f1;
-    --phase: #0e7c8b;
-    --phase-soft: rgba(14, 124, 139, 0.12);
-    --vip: #c0561a;
-    --vip-soft: rgba(192, 86, 26, 0.12);
-    --both: #4b3f9a;
-    --both-soft: rgba(75, 63, 154, 0.12);
-    --lineq: #1d5aa6;
-    --lineq-soft: rgba(29, 90, 166, 0.12);
-    --lead: #3d5a73;
+    --phase: #0f766e;
+    --phase-soft: rgba(15, 118, 110, 0.12);
+    --vip: #c2410c;
+    --vip-soft: rgba(194, 65, 12, 0.12);
+    --both: #6d28d9;
+    --both-soft: rgba(109, 40, 217, 0.12);
+    --lineq: #1d4ed8;
+    --lineq-soft: rgba(29, 78, 216, 0.12);
+    --lead: #be185d;
+    --time-ink: #0f2744;
+    --time-bg: #d7e7f5;
+    --time-mark: #0f766e;
     --brk: #b9c9d6;
     --gap: #b42318;
     --gap-bg: rgba(180, 35, 24, 0.08);
@@ -439,9 +445,14 @@
   .week-col h3 b { display: block; font-family: var(--serif); font-size: 22px; color: var(--ink); font-weight: 600; }
   .who { font-size: 12px; margin-top: 4px; color: var(--ink); }
   .who-time {
-    margin: 8px 0 2px; font-size: 11px; font-weight: 700; color: var(--muted);
+    margin: 9px 0 4px; padding: 3px 7px 3px 8px;
+    border-radius: 6px; background: var(--time-bg);
+    box-shadow: inset 3px 0 0 var(--time-mark);
+    font-size: 11px; font-weight: 800; letter-spacing: 0.04em;
+    color: var(--time-ink);
   }
   .who-person { margin: 0 0 2px; line-height: 1.35; }
+  .who-person button { font-weight: 700; }
   .who-person.q-lead button { color: var(--lead); }
   .who-person.q-vip button { color: var(--vip); }
   .who-person.q-phase button { color: var(--phase); }
@@ -449,8 +460,9 @@
   .who-person.q-both button { color: var(--both); }
   .who-person.off button,
   .who-off {
-    color: var(--faint); font-weight: 700;
+    color: var(--gap); font-weight: 700;
     text-decoration: line-through; text-decoration-thickness: 1.5px;
+    text-decoration-color: var(--gap);
   }
   .day-offs { display: flex; flex-wrap: wrap; gap: 2px 8px; margin-top: 2px; }
   .day-offs .who-off { font-size: 11px; }
@@ -814,8 +826,8 @@
     { id: "frost", name: "Frost", swatch: "#1d5aa6" }
   ];
   const THEME_Q = {
-    night: { phase1: "#2ee6c5", vip: "#ffb020", both: "#c084fc", line: "#6ea8ff", lead: "#94a3b8" },
-    frost: { phase1: "#0e7c8b", vip: "#c0561a", both: "#4b3f9a", line: "#1d5aa6", lead: "#3d5a73" }
+    night: { phase1: "#2ee6c5", vip: "#ffb020", both: "#e879f9", line: "#62b4ff", lead: "#ffbe7a" },
+    frost: { phase1: "#0f766e", vip: "#c2410c", both: "#6d28d9", line: "#1d4ed8", lead: "#be185d" }
   };
   const START_MIN = 15 * 60;
   const END_MIN = 32 * 60;
@@ -945,7 +957,7 @@
   function slotOptionHtml(selected, maxSlot) {
     let html = "";
     for (let s = 0; s <= maxSlot; s++) {
-      html += `<option value="${s}"${s === selected ? " selected" : ""}>${slotLabel(s)} · ${formatClock(slotInstant(ui.cursor, s), "America/New_York")} ET</option>`;
+      html += `<option value="${s}"${s === selected ? " selected" : ""}>${slotLabel(s)} PKT · ${formatClock(slotInstant(ui.cursor, s), "America/New_York")} ET</option>`;
     }
     return html;
   }
@@ -5197,7 +5209,7 @@
         </div>`;
       }).join("");
       box.innerHTML = `<h2>Edit roster</h2>
-        <p>Add or remove people, drag the handle to rearrange, then tick roles and hours. Apply hours to all time or to one month.</p>
+        <p>Shift times are PKT first, with ET after. Add or remove people, drag the handle to rearrange, then tick roles and hours. Apply hours to all time or to one month.</p>
         <div class="hours-scope">
           <input id="newPersonName" type="text" placeholder="New person name" autocomplete="off">
           <button type="button" class="primary" id="addPersonBtn">Add person</button>
