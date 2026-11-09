@@ -238,7 +238,7 @@
     width: 100%; text-align: left; border: 0; background: transparent;
     color: var(--ink); border-radius: 8px; padding: 7px 9px; font-size: 12px; font-weight: 600;
   }
-  .pop button:hover { background: var(--rail); }
+  .pop button:hover, .pop button.on { background: var(--rail); }
   .pop .pop-label {
     font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
     color: var(--muted); padding: 6px 9px 4px; font-weight: 700;
@@ -778,6 +778,7 @@
             <button type="button" id="rosterBtn">Edit roster</button>
             <button type="button" id="reviewBtn">Add leave</button>
             <button type="button" id="holidayBtn">Plan holiday</button>
+            <button type="button" id="dstBtn">DST +1 hour</button>
             <button type="button" id="exportBtn">Export JSON</button>
             <button type="button" id="importBtn">Import</button>
             <button type="button" id="snapshotBtn">Save snapshot</button>
@@ -1030,7 +1031,8 @@
       lineBars: clone(DEFAULT_LINE),
       leaves: [],
       holidays: [],
-      days: {}
+      days: {},
+      dst: false
     };
   }
 
@@ -1186,6 +1188,48 @@
       (day.lineBars || []).forEach(bumpB);
     });
   }
+  function shiftPersonClock(p, delta) {
+    if (!p || !Number.isFinite(p.start)) return;
+    const len = Number.isFinite(p.len) ? p.len : 0;
+    const start = clamp(p.start + delta, 0, Math.max(0, SLOTS - len));
+    const applied = start - p.start;
+    p.start = start;
+    if (Number.isFinite(p.brk)) p.brk += applied;
+    if (p.split && Number.isFinite(p.split.at)) p.split.at += applied;
+  }
+  function shiftBarClock(b, delta) {
+    if (!b || !Number.isFinite(b.start)) return;
+    const len = Number.isFinite(b.len) ? b.len : 0;
+    b.start = clamp(b.start + delta, 0, Math.max(0, SLOTS - len));
+  }
+  function shiftAllClocks(delta) {
+    if (!delta) return;
+    (data.people || []).forEach(p => shiftPersonClock(p, delta));
+    (data.lineBars || []).forEach(b => shiftBarClock(b, delta));
+    Object.values(data.days || {}).forEach(day => {
+      (day.people || []).forEach(p => shiftPersonClock(p, delta));
+      (day.lineBars || []).forEach(b => shiftBarClock(b, delta));
+    });
+    (data.holidays || []).forEach(plan => {
+      Object.values(plan.hours || {}).forEach(row => {
+        Object.values(row || {}).forEach(span => {
+          if (!span || !Number.isFinite(span.start) || !Number.isFinite(span.end)) return;
+          const len = span.end - span.start;
+          const start = clamp(span.start + delta, 0, Math.max(0, SLOTS - len));
+          span.end = start + len;
+          span.start = start;
+        });
+      });
+    });
+  }
+  function setDst(on) {
+    const next = !!on;
+    if (next === !!data.dst) return;
+    shiftAllClocks(next ? 2 : -2);
+    data.dst = next;
+    persist();
+    render();
+  }
   function sanitizeData(raw) {
     const d = defaultData();
     if (!raw || typeof raw !== "object") return d;
@@ -1234,6 +1278,7 @@
       if (isSaturday(k) && !(d.days[k] && d.days[k].weekendCover)) delete d.days[k];
     });
     d.updatedAt = typeof raw.updatedAt === "string" ? raw.updatedAt : "";
+    d.dst = raw.dst === true;
     return d;
   }
 
@@ -1364,6 +1409,7 @@
     });
     out.holidays = holidays;
     out.days = Object.assign({}, out.days || {}, mine.days || {});
+    out.dst = typeof mine.dst === "boolean" ? mine.dst : !!out.dst;
     return out;
   }
   function scheduleTeamPush() {
@@ -5593,6 +5639,11 @@
         render();
       });
     });
+    const dstBtn = document.getElementById("dstBtn");
+    if (dstBtn) {
+      dstBtn.textContent = data.dst ? "DST +1 hour on" : "DST +1 hour";
+      dstBtn.classList.toggle("on", !!data.dst);
+    }
   }
   function closePops() {
     const filtersWereOpen = ui.roleMenuOpen || ui.peopleMenuOpen;
@@ -5623,6 +5674,10 @@
   document.getElementById("holidayBtn").addEventListener("click", () => {
     closePops();
     openModal("holiday");
+  });
+  document.getElementById("dstBtn").addEventListener("click", e => {
+    e.stopPropagation();
+    setDst(!data.dst);
   });
   document.getElementById("accessBtn").addEventListener("click", e => {
     e.stopPropagation();
