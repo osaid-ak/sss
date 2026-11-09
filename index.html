@@ -733,8 +733,8 @@
       <h1 class="brand">Shift Plan<span>SSS</span></h1>
       <div class="views" id="viewTabs">
         <button data-view="year">Year</button>
-        <button data-view="month" class="on">Month</button>
-        <button data-view="week">Week</button>
+        <button data-view="month">Month</button>
+        <button data-view="week" class="on">Week</button>
         <button data-view="day">Day</button>
       </div>
       <div class="nav">
@@ -865,6 +865,10 @@
   function isSunday(keyOrDate) {
     const d = typeof keyOrDate === "string" ? parseKey(keyOrDate) : keyOrDate;
     return d.getDay() === 0;
+  }
+  function isSaturday(keyOrDate) {
+    const d = typeof keyOrDate === "string" ? parseKey(keyOrDate) : keyOrDate;
+    return d.getDay() === 6;
   }
   function isClosedDay(keyOrDate) {
     return isSunday(keyOrDate);
@@ -1210,6 +1214,9 @@
         syncPersonDerived(p);
       }
     });
+    Object.keys(d.days).forEach(k => {
+      if (isSaturday(k) && !(d.days[k] && d.days[k].weekendCover)) delete d.days[k];
+    });
     return d;
   }
 
@@ -1233,8 +1240,8 @@
   }
 
   const ui = {
-    view: "month",
-    fromView: "month",
+    view: "week",
+    fromView: "week",
     cursor: nightAnchor(new Date()),
     editing: false,
     modal: null,
@@ -1478,12 +1485,21 @@
     if (cell || row.length) { row.push(cell); rows.push(row); }
     return rows.map(r => r.map(v => String(v || "").replace(/\n/g, " ").trim()));
   }
+  function gvizCellText(cell) {
+    if (!cell) return "";
+    if (cell.f != null && String(cell.f).trim()) return String(cell.f).replace(/\n/g, " ").trim();
+    const v = cell.v;
+    if (typeof v === "string") {
+      const dateBits = v.match(/^Date\((\d+),(\d+),(\d+)/);
+      if (dateBits) {
+        const d = new Date(Number(dateBits[1]), Number(dateBits[2]), Number(dateBits[3]));
+        return d.getDate() + " " + MONTHS[d.getMonth()].slice(0, 3) + " " + d.getFullYear();
+      }
+    }
+    return String(v == null ? "" : v).replace(/\n/g, " ").trim();
+  }
   function parseGvizRows(table) {
-    return (table.rows || []).map(row => (row.c || []).map(cell => {
-      if (!cell) return "";
-      const raw = cell.f != null ? cell.f : cell.v;
-      return String(raw == null ? "" : raw).replace(/\n/g, " ").trim();
-    }));
+    return (table.rows || []).map(row => (row.c || []).map(gvizCellText));
   }
   function parseWeekendPayload(text) {
     const trimmed = String(text || "").replace(/^\uFEFF/, "").trim();
@@ -1510,29 +1526,67 @@
       weekends: parseWeekendRows(parseCsvRows(trimmed))
     };
   }
-  function weekendCoverUrls(force) {
-    const urls = [];
-    if (WEEKEND_COVER_API) urls.push(WEEKEND_COVER_API + (force ? (WEEKEND_COVER_API.indexOf("?") >= 0 ? "&" : "?") + "fresh=1" : ""));
-    urls.push("https://docs.google.com/spreadsheets/d/" + WEEKEND_SHEET_ID + "/gviz/tq?tqx=out:json&gid=" + WEEKEND_SHEET_GID);
-    urls.push("https://docs.google.com/spreadsheets/d/" + WEEKEND_SHEET_ID + "/export?format=csv&gid=" + WEEKEND_SHEET_GID);
-    urls.push("/api/weekend-cover" + (force ? "?fresh=1" : ""));
-    return urls;
+  function gvizWeekendUrl(handler) {
+    const tqx = handler ? "out:json;responseHandler:" + handler : "out:json";
+    return "https://docs.google.com/spreadsheets/d/" + WEEKEND_SHEET_ID +
+      "/gviz/tq?gid=" + WEEKEND_SHEET_GID + "&tqx=" + encodeURIComponent(tqx) + "&_=" + Date.now();
+  }
+  function fetchGvizJsonp() {
+    return new Promise((resolve, reject) => {
+      const name = "sssWeekend_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+      let script;
+      const timer = setTimeout(() => finish(new Error("Weekend Cover timed out.")), 15000);
+      function finish(err, payload) {
+        clearTimeout(timer);
+        try { delete window[name]; } catch (_) { window[name] = undefined; }
+        if (script && script.parentNode) script.parentNode.removeChild(script);
+        if (err) reject(err);
+        else resolve(payload);
+      }
+      window[name] = function (json) {
+        try {
+          if (!json || json.status === "error") {
+            finish(new Error("Weekend Cover tab is not readable from the live page."));
+            return;
+          }
+          finish(null, {
+            fetchedAt: new Date().toISOString(),
+            source: "sheet",
+            weekends: parseWeekendRows(parseGvizRows(json.table || {}))
+          });
+        } catch (err) {
+          finish(err);
+        }
+      };
+      script = document.createElement("script");
+      script.async = true;
+      script.src = gvizWeekendUrl(name);
+      script.onerror = function () { finish(new Error("Weekend Cover request failed.")); };
+      document.head.appendChild(script);
+    });
+  }
+  function fetchSameOrigin(url) {
+    return fetch(url, { cache: "no-store" }).then(res => {
+      if (!res.ok) throw new Error("bad status");
+      return res.text();
+    }).then(text => {
+      const payload = parseWeekendPayload(text);
+      if (payload && payload.error && !(payload.weekends || []).length) throw new Error(payload.error);
+      return payload;
+    });
   }
   function fetchWeekendCoverPayload(force) {
-    const urls = weekendCoverUrls(force);
+    const tries = [];
+    if (WEEKEND_COVER_API) {
+      tries.push(() => fetchSameOrigin(WEEKEND_COVER_API + (force ? (WEEKEND_COVER_API.indexOf("?") >= 0 ? "&" : "?") + "fresh=1" : "")));
+    }
+    tries.push(() => fetchGvizJsonp());
+    tries.push(() => fetchSameOrigin("/api/weekend-cover" + (force ? "?fresh=1" : "")));
     const tryOne = index => {
-      if (index >= urls.length) {
-        return Promise.reject(new Error("Could not read Weekend Cover from the live sheet. Share that tab as Anyone with the link can view, or deploy weekend-cover.gs."));
+      if (index >= tries.length) {
+        return Promise.reject(new Error("Could not read Weekend Cover from the live sheet."));
       }
-      return fetch(urls[index], { cache: "no-store" }).then(res => {
-        if (!res.ok) throw new Error("bad status");
-        return res.text();
-      }).then(text => {
-        const payload = parseWeekendPayload(text);
-        if (payload && payload.fromCache && force) throw new Error(payload.error || "stale");
-        if (payload && payload.error && !(payload.weekends || []).length) throw new Error(payload.error);
-        return payload;
-      }).catch(() => tryOne(index + 1));
+      return tries[index]().catch(() => tryOne(index + 1));
     };
     return tryOne(0);
   }
@@ -1693,6 +1747,7 @@
     if (plan.offs[key] && plan.offs[key][name]) return plan.offs[key][name];
     if (onLeave(name, key)) return "pto";
     const covering = weekendCoverNames(key);
+    if (isSaturday(key) && !covering) return "off";
     if (covering && !covering.has(name)) return "off";
     return "";
   }
@@ -2623,6 +2678,21 @@
       return { people: [], lineBars: [], away: new Set(), closed: true, weekend: false };
     }
     const src = data.days[key];
+    if (isSaturday(key)) {
+      const cover = src && src.weekendCover;
+      if (!cover) {
+        return { people: [], lineBars: [], away: new Set(), closed: false, weekend: true };
+      }
+      const people = clone(src.people && src.people.length ? src.people : []);
+      if (previewPlan && previewPlan.hours && previewPlan.hours[key]) {
+        Object.keys(previewPlan.hours[key]).forEach(name => {
+          const h = previewPlan.hours[key][name];
+          const p = people.find(x => x.name === name);
+          if (p) applyHoursToPerson(p, h.start, h.end - h.start, clamp(p.brk, h.start, Math.max(h.start, h.end - 2)));
+        });
+      }
+      return { people, lineBars: [], away: new Set(), closed: false, weekend: true };
+    }
     const people = clone(src ? src.people : data.people);
     const lineBars = clone(src ? src.lineBars : data.lineBars);
     if (previewPlan && previewPlan.hours && previewPlan.hours[key]) {
@@ -2632,17 +2702,14 @@
         if (p) applyHoursToPerson(p, h.start, h.end - h.start, clamp(p.brk, h.start, Math.max(h.start, h.end - 2)));
       });
     }
-    const cover = src && src.weekendCover;
-    const covering = cover ? new Set([cover.phase1].concat(cover.vip || []).filter(Boolean)) : null;
     return {
       people,
       lineBars,
       closed: false,
-      weekend: !!cover,
+      weekend: false,
       away: new Set(people.filter(p => {
         if (isHolidayAway(p.name, key, previewPlan)) return true;
-        if (covering && !covering.has(p.name)) return true;
-        return onLeave(p.name, key) && !(covering && covering.has(p.name));
+        return onLeave(p.name, key);
       }).map(p => p.name))
     };
   }
@@ -2650,6 +2717,9 @@
   function ensureDay(key) {
     if (isClosedDay(key)) {
       return { people: [], lineBars: [], closed: true };
+    }
+    if (isSaturday(key) && !weekendCoverOf(key)) {
+      return data.days[key] || { people: [], lineBars: [], weekendCover: null };
     }
     if (!data.days[key]) {
       const r = resolveDay(key);
@@ -2694,6 +2764,14 @@
     const minOf = arr => arr.length ? Math.min.apply(null, arr) : 0;
     const heads = roleHeadcount(people, lineBars, away);
     const cover = weekendCoverOf(key);
+    if (isSaturday(key) && !cover) {
+      return {
+        phase, vip, line, weekend: true, closed: false,
+        minPhase: 0, minVip: 0, minLine: 0,
+        onPhase: 0, onVip: 0, onLine: 0,
+        gap: false, thin: false
+      };
+    }
     if (cover) {
       const nPhase = cover.phase1 && !away.has(cover.phase1) ? 1 : 0;
       const nVip = (cover.vip || []).filter(n => !away.has(n)).length;
@@ -2777,6 +2855,7 @@
       return chips.length ? `<div class="chips">${chips.join("")}</div>` : "";
     }
     if (cov.weekend) {
+      if (!cov.onPhase && !cov.onVip) return "";
       return `<div class="chips">
         <span class="chip phase"><span>Phase 1</span><span>${cov.onPhase}</span></span>
         <span class="chip vip"><span>VIP</span><span>${cov.onVip}</span></span>
@@ -2802,6 +2881,9 @@
       return html;
     }
     const cover = weekendCoverOf(key);
+    if (isSaturday(key) && !cover) {
+      return `<div class="weekend-tag">Weekend cover</div><div class="closed-label">Waiting for Actual Cover</div>`;
+    }
     if (cover) {
       let html = `<div class="weekend-tag">Weekend cover</div>`;
       if (cover.phase1) html += `<div class="person-line">P1 ${esc(cover.phase1)}</div>`;
@@ -3068,7 +3150,10 @@
       const shown = dim ? [] : (hasActiveFilter() ? scheduledUnderFilter(day) : visiblePeople(day));
       const who = cov.closed
         ? `<div class="closed-label">OFF · floor closed</div>`
-        : dim ? "" : weekWhoHtml(day, shown);
+        : dim ? ""
+        : (day.weekend && !shown.length)
+          ? `<div class="weekend-tag">Weekend cover</div><div class="closed-label">Waiting for Actual Cover</div>`
+          : weekWhoHtml(day, shown);
       html += `<article class="card week-col ${sameDay(d, today) ? "today" : ""} ${isPastNight(d, today) ? "past" : ""} ${dim ? "dim" : toneClass(cov)}" data-open-day="${key}">
         <h3>${DOW[i]} <b>${d.getDate()}</b></h3>
         ${dim ? "" : chipsHtml(cov)}
@@ -3098,7 +3183,9 @@
     const cover = weekendCoverOf(key);
     const weekendLine = cover
       ? `<p>Weekend cover from Actual Cover · Phase 1 8pm–2am · VIP 5pm–2am PKT${cover.status ? " · " + esc(cover.status) : ""}${cover.remarks ? " · " + esc(cover.remarks) : ""}</p>`
-      : `<p>${nightRangeLabel(ui.cursor)} · into ${nextName}. Overnight hours stay on this date.</p>`;
+      : isSaturday(key)
+        ? `<p>Saturday follows Actual Cover only. Waiting to read the Weekend Cover sheet.</p>`
+        : `<p>${nightRangeLabel(ui.cursor)} · into ${nextName}. Overnight hours stay on this date.</p>`;
     return `<div class="day-view">
     <div class="day-head">
       <div>
@@ -3134,7 +3221,7 @@
       });
     });
     const back = document.getElementById("backView");
-    if (back) back.addEventListener("click", () => setView(ui.fromView || "month"));
+    if (back) back.addEventListener("click", () => setView(ui.fromView || "week"));
     document.querySelectorAll("#main [data-filter-name]").forEach(el => {
       el.addEventListener("click", e => {
         e.stopPropagation();
@@ -4845,6 +4932,7 @@
     try { localStorage.setItem(THEME_KEY, t); } catch (_) {}
   }
   function renderChrome() {
+    document.querySelectorAll("#viewTabs button").forEach(b => b.classList.toggle("on", b.dataset.view === ui.view));
     document.getElementById("accessMenu").classList.toggle("hidden", !ui.accessOpen);
     document.getElementById("themeMenu").classList.toggle("hidden", !ui.themeOpen);
     const box = document.getElementById("themeSwatches");
