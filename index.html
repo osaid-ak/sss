@@ -853,6 +853,18 @@
   const PEAK_END = 18;
   const LINE_START = 4;
   const LINE_END = 24;
+  function dstSlots() { return data.dst ? 2 : 0; }
+  function peakWindow() {
+    const off = dstSlots();
+    return { start: PEAK_START + off, end: PEAK_END + off };
+  }
+  function lineWindow() {
+    const off = dstSlots();
+    return { start: LINE_START + off, end: LINE_END + off };
+  }
+  function windowLabel(start, end) {
+    return slotLabel(start) + "–" + slotLabel(end);
+  }
   const P1_WKND_START = 10;
   const P1_WKND_LEN = 12;
   const VIP_WKND_START = 4;
@@ -2454,10 +2466,11 @@
     const track = document.createElement("div");
     track.className = "track";
     track.style.width = trackW + "px";
+    const peakWin = peakWindow();
     const peak = document.createElement("div");
     peak.className = "peak-band";
-    peak.style.left = (PEAK_START * colW) + "px";
-    peak.style.width = ((PEAK_END - PEAK_START) * colW) + "px";
+    peak.style.left = (peakWin.start * colW) + "px";
+    peak.style.width = ((peakWin.end - peakWin.start) * colW) + "px";
     track.appendChild(peak);
     for (let s = 1; s < SLOTS; s++) {
       const g = document.createElement("div");
@@ -2602,7 +2615,9 @@
     const trackW = colW * SLOTS;
     planner.style.minWidth = (LABEL_W + trackW) + "px";
     planner.appendChild(makeHolidayAxis(colW));
-    planner.appendChild(makeBand(colW, PEAK_START, PEAK_END, "Peak 7pm–12am PKT", "peak"));
+    const peakWin = peakWindow();
+    const lineWin = lineWindow();
+    planner.appendChild(makeBand(colW, peakWin.start, peakWin.end, "Peak " + windowLabel(peakWin.start, peakWin.end) + " PKT", "peak"));
     const cols = holidayColumns();
     [
       { title: "Phase 1", people: cols.p1 },
@@ -2620,6 +2635,7 @@
         planner.appendChild(makeHolidayRow(plan, key, p, plannerCellMark(plan, key, p.name), colW, trackW));
       });
     });
+    planner.appendChild(makeBand(colW, lineWin.start, lineWin.end, "Support Line " + windowLabel(lineWin.start, lineWin.end) + " PKT", "line"));
     const strips = document.createElement("div");
     strips.className = "avail-wrap";
     const cap = document.createElement("div");
@@ -3543,19 +3559,21 @@
         thin: nVip === 1
       };
     }
-    const peakPhase = phase.slice(PEAK_START, PEAK_END);
-    const peakVip = vip.slice(PEAK_START, PEAK_END);
-    const lineWindow = line.slice(LINE_START, LINE_END);
+    const peakWin = peakWindow();
+    const lineWin = lineWindow();
+    const peakPhase = phase.slice(peakWin.start, peakWin.end);
+    const peakVip = vip.slice(peakWin.start, peakWin.end);
+    const lineSpan = line.slice(lineWin.start, lineWin.end);
     return {
       phase, vip, line, weekend: false, closed: false,
       minPhase: minOf(peakPhase),
       minVip: minOf(peakVip),
-      minLine: minOf(lineWindow),
+      minLine: minOf(lineSpan),
       onPhase: heads.onPhase,
       onVip: heads.onVip,
       onLine: heads.onLine,
-      gap: peakPhase.some(v => v === 0) || peakVip.some(v => v === 0) || lineWindow.some(v => v === 0),
-      thin: peakPhase.some(v => v === 1) || peakVip.some(v => v === 1) || lineWindow.some(v => v === 1)
+      gap: peakPhase.some(v => v === 0) || peakVip.some(v => v === 0) || lineSpan.some(v => v === 0),
+      thin: peakPhase.some(v => v === 1) || peakVip.some(v => v === 1) || lineSpan.some(v => v === 1)
     };
   }
   function roleHeadcount(people, lineBars, away) {
@@ -4121,7 +4139,8 @@
     const head = document.createElement("div");
     head.className = "planner-head";
     head.appendChild(makeAxis(colW));
-    head.appendChild(makeBand(colW, PEAK_START, PEAK_END, "Peak 7pm–12am PKT", "peak"));
+    const peakWin = peakWindow();
+    head.appendChild(makeBand(colW, peakWin.start, peakWin.end, "Peak " + windowLabel(peakWin.start, peakWin.end) + " PKT", "peak"));
     planner.appendChild(head);
 
     const groups = [];
@@ -4147,7 +4166,8 @@
       g.idxs.forEach(idx => planner.appendChild(makeRow(day, idx, colW, trackW, key)));
     });
 
-    planner.appendChild(makeBand(colW, LINE_START, LINE_END, "Support Line 5pm–3am PKT", "line"));
+    const lineWin = lineWindow();
+    planner.appendChild(makeBand(colW, lineWin.start, lineWin.end, "Support Line " + windowLabel(lineWin.start, lineWin.end) + " PKT", "line"));
 
     const wrap = document.createElement("div");
     wrap.className = "avail-wrap";
@@ -4232,10 +4252,11 @@
     const track = document.createElement("div");
     track.className = "track";
     track.style.width = trackW + "px";
+    const peakWin = peakWindow();
     const peak = document.createElement("div");
     peak.className = "peak-band";
-    peak.style.left = (PEAK_START * colW) + "px";
-    peak.style.width = ((PEAK_END - PEAK_START) * colW) + "px";
+    peak.style.left = (peakWin.start * colW) + "px";
+    peak.style.width = ((peakWin.end - peakWin.start) * colW) + "px";
     track.appendChild(peak);
     for (let s = 1; s < SLOTS; s++) {
       const g = document.createElement("div");
@@ -4407,8 +4428,10 @@
   function availCell(s, span, v, colW, team) {
     const cell = document.createElement("div");
     cell.className = "acell";
-    const inPeak = s >= PEAK_START && s < PEAK_END;
-    const lineOff = team === "line" && (s < LINE_START || s >= LINE_END);
+    const peakWin = peakWindow();
+    const lineWin = lineWindow();
+    const inPeak = s >= peakWin.start && s < peakWin.end;
+    const lineOff = team === "line" && (s < lineWin.start || s >= lineWin.end);
     let bg = "var(--rail)", col = "var(--muted)";
     if (lineOff) { bg = "transparent"; col = "var(--faint)"; }
     else if (v === 0) { bg = "var(--gap-bg)"; col = "var(--gap)"; }
@@ -4773,9 +4796,15 @@
     });
     return uniq.find(b => !overlaps(b)) != null ? uniq.find(b => !overlaps(b)) : (uniq[0] != null ? uniq[0] : ns);
   }
-  function isPeakSlot(s) { return s >= PEAK_START && s < PEAK_END; }
+  function isPeakSlot(s) {
+    const w = peakWindow();
+    return s >= w.start && s < w.end;
+  }
   function needFloor(s, team) {
-    if (team === "line") return (s >= LINE_START && s < LINE_END) ? 1 : 0;
+    if (team === "line") {
+      const w = lineWindow();
+      return (s >= w.start && s < w.end) ? 1 : 0;
+    }
     return isPeakSlot(s) ? 2 : 1;
   }
   function shortSlots(prev, next, team, watch) {
@@ -5233,7 +5262,7 @@
     }
     const work = plan.days.filter(d => !d.closed && !d.skip);
     const closed = plan.days.filter(d => d.closed).length;
-    const parts = [`<p>${esc(plan.name)} · ${plan.days.length} calendar day${plan.days.length === 1 ? "" : "s"} · ${work.length} working night${work.length === 1 ? "" : "s"}${closed ? " · " + closed + " Sunday" + (closed === 1 ? "" : "s") + " closed" : ""} · Peak (7pm–12am) needs 2 · off-peak needs 1 · Support Line needs 1 from 5pm–3am. Pick one move to apply.</p>`];
+    const parts = [`<p>${esc(plan.name)} · ${plan.days.length} calendar day${plan.days.length === 1 ? "" : "s"} · ${work.length} working night${work.length === 1 ? "" : "s"}${closed ? " · " + closed + " Sunday" + (closed === 1 ? "" : "s") + " closed" : ""} · Peak (${windowLabel(peakWindow().start, peakWindow().end)}) needs 2 · off-peak needs 1 · Support Line needs 1 from ${windowLabel(lineWindow().start, lineWindow().end)}. Pick one move to apply.</p>`];
     plan.days.forEach((d, di) => {
       const label = holidayDateLabel(d.key);
       if (d.closed) {
@@ -5370,7 +5399,7 @@
       const listed = approvedLeaves().slice().sort((a, b) => (b.start + b.id).localeCompare(a.start + a.id));
       ui.leavePlan = buildLeaveCoverage(pick, today, today);
       box.innerHTML = `<h2>Add leave</h2>
-        <p>Pick who is off and for which nights. Pick one coverage move per night. A move only needs a follow-up if it leaves peak (7pm–12am) below 2 people, leaves off-peak with nobody, or leaves Support Line empty from 5pm–3am. Shifts stay 9 hours. Leads are not used.</p>
+        <p>Pick who is off and for which nights. Pick one coverage move per night. A move only needs a follow-up if it leaves peak (${windowLabel(peakWindow().start, peakWindow().end)}) below 2 people, leaves off-peak with nobody, or leaves Support Line empty from ${windowLabel(lineWindow().start, lineWindow().end)}. Shifts stay 9 hours. Leads are not used.</p>
         <label>Person</label><select id="lvName">${names}</select>
         <label>From</label><input id="lvStart" type="date" value="${today}">
         <label>To</label><input id="lvEnd" type="date" value="${today}">
