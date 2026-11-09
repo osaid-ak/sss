@@ -1,7 +1,35 @@
-# Floor Coverage calendar
+# Support Shift Schedule (SSS)
 
-Team test copy of the support floor coverage calendar.
+Team test copy of the support shift calendar.
 
-Open the live page, click around Month / Week / Day, and send feedback. Schedule data lives in **your browser only**, so two people will not see each other’s edits unless someone uses **Export** / **Import**.
+## Live page
 
-Weekend sheet sync needs the local helper on the machine that has Google access. It will not run on this public page.
+https://osaid-ak.github.io/sss/
+
+The header on the site is **Shift Plan**.
+
+A true custom hostname such as `sss.yourteam.com` is free on GitHub Pages, but you have to own the domain.
+
+## Weekend Cover
+
+**Weekend Coverage** opens the Google Sheet for anyone who already has access.
+
+The calendar also reads Saturday Actual Cover from that sheet on load, when you come back to the tab, and about every 45 seconds. For that live read to work from the public page, use one of these:
+
+1. Share the Weekend Cover tab as **Anyone with the link can view** (edit access can stay limited to the team), or
+2. Deploy `weekend-cover.gs` from the sheet: Extensions → Apps Script → paste → Deploy → Web app → Execute as Me, Who has access: Anyone. Put the `/exec` URL in `WEEKEND_COVER_API` in the calendar file.
+
+## What testers should know
+
+Schedule edits live in **each person’s browser**. They do not sync to each other unless someone uses Export / Import.
+
+## Safety of a public GitHub repo
+
+Treat this as an internal test link, not a vault.
+
+- Anyone on the internet can open the repo and the live page if they find the URL.
+- Teammate names, the Google Sheet ID, and the lead PIN are in the page source.
+- A public repo can be indexed by search engines.
+- Google tokens were not uploaded. The sheet stays as private as its Google sharing settings. If you make Weekend Cover “anyone with the link” so the calendar can auto-sync, that tab is readable by anyone who has the link.
+
+Safer for a longer test: make the GitHub repo **private** and host the page on Cloudflare Pages (free), then share only that URL with the team.
