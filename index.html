@@ -28,8 +28,8 @@
     --lineq: #818cf8;
     --lineq-soft: rgba(129, 140, 248, 0.18);
     --lead: #7dd3fc;
-    --time-ink: #f7fbff;
-    --time-bg: #2c3b52;
+    --time-ink: #f6d36b;
+    --time-bg: rgba(246, 211, 107, 0.16);
     --time-mark: #f6d36b;
     --brk: #3d4554;
     --gap: #ff5c7a;
@@ -70,8 +70,8 @@
     --lineq: #0e7490;
     --lineq-soft: rgba(14, 116, 144, 0.12);
     --lead: #1d4ed8;
-    --time-ink: #0f2744;
-    --time-bg: #d7e7f5;
+    --time-ink: #a16207;
+    --time-bg: rgba(202, 138, 4, 0.16);
     --time-mark: #0f766e;
     --brk: #b9c9d6;
     --gap: #dc2626;
@@ -445,10 +445,10 @@
   .week-col h3 b { display: block; font-family: var(--serif); font-size: 22px; color: var(--ink); font-weight: 600; }
   .who { font-size: 12px; margin-top: 4px; color: var(--ink); }
   .who-time {
-    margin: 9px 0 4px; padding: 3px 7px 3px 8px;
-    border-radius: 6px; background: var(--time-bg);
-    box-shadow: inset 3px 0 0 var(--time-mark);
-    font-size: 11px; font-weight: 800; letter-spacing: 0.04em;
+    margin: 8px 0 4px; padding: 3px 7px;
+    border-radius: 8px; background: var(--time-bg);
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
     color: var(--time-ink);
   }
   .who-person { margin: 0 0 2px; line-height: 1.35; }
@@ -464,16 +464,14 @@
     text-decoration: line-through; text-decoration-thickness: 1.5px;
     text-decoration-color: var(--gap);
   }
-  .who-line {
-    margin-top: 12px; padding: 8px 8px 4px;
-    border-radius: 8px; background: var(--lineq-soft);
-  }
+  .who-line { margin-top: 12px; }
   .who-line-head {
-    margin: 0 0 2px;
-    font-size: 11px; font-weight: 800; letter-spacing: 0.06em;
-    text-transform: uppercase; color: var(--lineq);
+    margin: 0 0 2px; padding: 3px 7px;
+    border-radius: 8px; background: var(--lineq-soft); color: var(--lineq);
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
   }
-  .who-line .who-time { margin-top: 7px; }
+  .who-line .who-time { margin-top: 6px; background: var(--lineq-soft); color: var(--lineq); }
   .day-offs { display: flex; flex-wrap: wrap; gap: 2px 8px; margin-top: 2px; }
   .day-offs .who-off { font-size: 11px; }
 
@@ -3852,15 +3850,18 @@
       return d || a.name.localeCompare(b.name);
     });
     let html = "";
-    let last = null;
-    people.forEach(p => {
-      if (p.start !== last) {
-        html += `<div class="who-time">${esc(slotLabel(p.start))}</div>`;
-        last = p.start;
+    let i = 0;
+    while (i < people.length) {
+      const start = people[i].start;
+      let j = i + 1;
+      while (j < people.length && people[j].start === start) j++;
+      html += `<div class="who-time"><span>${esc(slotLabel(start))}</span><span>${j - i}</span></div>`;
+      for (; i < j; i++) {
+        const p = people[i];
+        const off = away.has(p.name);
+        html += `<div class="who-person ${off ? "off" : "q-" + weekTone(p)}"><button type="button" data-filter-name="${esc(p.name)}">${esc(p.name)}</button></div>`;
       }
-      const off = away.has(p.name);
-      html += `<div class="who-person ${off ? "off" : "q-" + weekTone(p)}"><button type="button" data-filter-name="${esc(p.name)}">${esc(p.name)}</button></div>`;
-    });
+    }
     html += weekLineHtml(day, shown);
     return `<div class="who">${html}</div>`;
   }
@@ -3869,17 +3870,22 @@
     const bars = (day.lineBars || []).filter(b => names.has(b.owner));
     if (!bars.length) return "";
     bars.sort((a, b) => a.start - b.start || a.len - b.len || a.owner.localeCompare(b.owner));
-    let html = `<div class="who-line"><div class="who-line-head">Support Line</div>`;
-    let last = "";
-    bars.forEach(b => {
-      const label = slotLabel(b.start) + "–" + slotLabel(b.start + b.len);
-      if (label !== last) {
-        html += `<div class="who-time">${esc(label)}</div>`;
-        last = label;
+    let html = `<div class="who-line"><div class="who-line-head"><span>Support Line</span><span>${bars.length}</span></div>`;
+    let i = 0;
+    while (i < bars.length) {
+      const label = slotLabel(bars[i].start) + "–" + slotLabel(bars[i].start + bars[i].len);
+      let j = i + 1;
+      while (j < bars.length) {
+        const next = slotLabel(bars[j].start) + "–" + slotLabel(bars[j].start + bars[j].len);
+        if (next !== label) break;
+        j++;
       }
-      const off = day.away.has(b.owner);
-      html += `<div class="who-person ${off ? "off" : "q-line"}"><button type="button" data-filter-name="${esc(b.owner)}">${esc(b.owner)}</button></div>`;
-    });
+      html += `<div class="who-time"><span>${esc(label)}</span><span>${j - i}</span></div>`;
+      for (; i < j; i++) {
+        const off = day.away.has(bars[i].owner);
+        html += `<div class="who-person ${off ? "off" : "q-line"}"><button type="button" data-filter-name="${esc(bars[i].owner)}">${esc(bars[i].owner)}</button></div>`;
+      }
+    }
     return html + "</div>";
   }
   function renderWeek() {
