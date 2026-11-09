@@ -1264,6 +1264,7 @@
     showClosed: (function () { try { const v = localStorage.getItem(SHOW_CLOSED_KEY); return v === null ? true : v === "1"; } catch (_) { return true; } })(),
     holidayId: null,
     holidayDate: null,
+    hpScroll: null,
     modalDirty: false,
     underModal: null,
     oooSeed: null
@@ -1872,6 +1873,34 @@
     }
     touchHoliday(plan);
   }
+  function paintHolidayCell(cell, plan, key, name) {
+    if (!cell) return;
+    const m = plannerCellMark(plan, key, name);
+    const locked = plannerCellLocked(plan, key, name);
+    cell.className = "hp-cell " + m + (locked ? " locked" : "");
+    cell.textContent = m === "closed" || m === "off" ? "OFF" : m === "pto" ? "PTO" : "";
+  }
+  function paintHolidayRowCounts(plan, key) {
+    const row = document.querySelector('tr.hp-row[data-hp-date="' + key + '"]');
+    if (!row) return;
+    const c = holidayCounts(plan, key, holidayColumns());
+    const phase = row.querySelector("td.count.phase");
+    const vip = row.querySelector("td.count.vip");
+    const total = row.querySelector("td.count.total");
+    if (phase) phase.textContent = c.p1;
+    if (vip) vip.textContent = c.vip;
+    if (total) total.textContent = c.total;
+  }
+  function holidayGridScroll() {
+    const wrap = document.querySelector(".hp-grid-wrap");
+    return wrap ? { x: wrap.scrollLeft, y: wrap.scrollTop } : null;
+  }
+  function restoreHolidayGridScroll(pos) {
+    const wrap = document.querySelector(".hp-grid-wrap");
+    if (!wrap || !pos) return;
+    wrap.scrollLeft = pos.x;
+    wrap.scrollTop = pos.y;
+  }
   function setHolidayHours(plan, key, name, start, end) {
     if (isClosedDay(key) || end <= start) return;
     if (!plan.hours[key]) plan.hours[key] = {};
@@ -1992,7 +2021,13 @@
     const row = document.querySelector("tr.hp-row.on");
     if (!wrap || !row) return;
     const head = wrap.querySelector("thead");
-    wrap.scrollTop = Math.max(0, row.offsetTop - (head ? head.offsetHeight : 0) - 4);
+    const headH = head ? head.offsetHeight : 0;
+    const top = row.offsetTop - headH - 4;
+    const bottom = row.offsetTop + row.offsetHeight;
+    const viewTop = wrap.scrollTop;
+    const viewBottom = viewTop + wrap.clientHeight;
+    if (top < viewTop) wrap.scrollTop = Math.max(0, top);
+    else if (bottom > viewBottom) wrap.scrollTop = Math.max(0, bottom - wrap.clientHeight);
   }
   function fillHolidayDayHead(plan, key) {
     const head = document.getElementById("hpDayHead");
@@ -2239,25 +2274,11 @@
     attachHolidayDrag(planner, plan, key, colW);
   }
   function refreshHolidayDay(plan) {
-    const wrap = document.querySelector(".hp-grid-wrap");
-    const sx = wrap ? wrap.scrollLeft : 0;
-    const sy = wrap ? wrap.scrollTop : 0;
+    const pos = holidayGridScroll();
     const key = ui.holidayDate;
-    if (key) {
-      const cols = holidayColumns();
-      const c = holidayCounts(plan, key, cols);
-      const row = document.querySelector('tr.hp-row[data-hp-date="' + key + '"]');
-      if (row) {
-        const phase = row.querySelector("td.count.phase");
-        const vip = row.querySelector("td.count.vip");
-        const total = row.querySelector("td.count.total");
-        if (phase) phase.textContent = c.p1;
-        if (vip) vip.textContent = c.vip;
-        if (total) total.textContent = c.total;
-      }
-    }
+    if (key) paintHolidayRowCounts(plan, key);
     buildHolidayPlanner(plan);
-    if (wrap) { wrap.scrollLeft = sx; wrap.scrollTop = sy; }
+    restoreHolidayGridScroll(pos);
   }
   function holidaySheetRows(plan) {
     const cols = holidayColumns();
@@ -2634,11 +2655,8 @@
     });
   }
   function refreshHolidayModal() {
-    const wrap = document.querySelector(".hp-grid-wrap");
-    const sx = wrap ? wrap.scrollLeft : 0;
+    ui.hpScroll = holidayGridScroll();
     openModal("holiday");
-    const wrap2 = document.querySelector(".hp-grid-wrap");
-    if (wrap2) wrap2.scrollLeft = sx;
   }
 
   function hasPeopleFilter() { return ui.peopleFilter.size > 0; }
@@ -5189,6 +5207,7 @@
       });
       box.querySelectorAll("[data-hp-open]").forEach(btn => {
         btn.addEventListener("click", e => {
+          e.preventDefault();
           e.stopPropagation();
           const key = btn.dataset.hpOpen;
           ui.holidayDate = ui.holidayDate === key ? null : key;
@@ -5197,13 +5216,21 @@
       });
       box.querySelectorAll("[data-hp-name]").forEach(cell => {
         cell.addEventListener("click", e => {
+          e.preventDefault();
           e.stopPropagation();
-          cycleHolidayCell(planOf(), cell.dataset.hpKey, cell.dataset.hpName);
-          refreshHolidayModal();
+          const plan = planOf();
+          const key = cell.dataset.hpKey;
+          const name = cell.dataset.hpName;
+          cycleHolidayCell(plan, key, name);
+          paintHolidayCell(cell, plan, key, name);
+          paintHolidayRowCounts(plan, key);
+          if (ui.holidayDate === key) refreshHolidayDay(plan);
         });
       });
       requestAnimationFrame(() => {
         buildHolidayPlanner(planOf());
+        restoreHolidayGridScroll(ui.hpScroll);
+        ui.hpScroll = null;
         revealHolidayOpen();
       });
     }
