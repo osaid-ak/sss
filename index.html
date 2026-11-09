@@ -1445,7 +1445,8 @@
       leaves: mergeRecords(base && base.leaves, remote && remote.leaves, local && local.leaves, remoteAt, localAt, item => item && item.id),
       holidays: mergeRecords(base && base.holidays, remote && remote.holidays, local && local.holidays, remoteAt, localAt, item => item && item.id),
       days: mergeDays(base && base.days, remote && remote.days, local && local.days, remoteAt, localAt),
-      dst: pickField(base && base.dst, remote && remote.dst, local && local.dst, remoteAt, localAt) === true
+      dst: pickField(base && base.dst, remote && remote.dst, local && local.dst, remoteAt, localAt) === true,
+      slotOrigin: START_MIN
     };
   }
   function teamBusy(status) {
@@ -3644,11 +3645,8 @@
   }
 
   function render() {
-    if ((teamPending || teamQueued) && !screenBusy() && !teamTimer && !teamPushing) {
-      teamPending = null;
-      syncTeam();
-      return;
-    }
+    const flushTeam = (teamPending || teamQueued) && !screenBusy() && !teamTimer && !teamPushing;
+    if (flushTeam) teamPending = null;
     const nav = navParts();
     document.getElementById("navTitle").innerHTML =
       `<span class="nav-kicker">${esc(nav.kicker)}</span><strong>${esc(nav.title)}</strong>` +
@@ -3673,6 +3671,7 @@
     } else if (ui.modal) {
       openModal(ui.modal, ui.leaveName);
     }
+    if (flushTeam) syncTeam();
   }
 
   function renderTeamPane() {
