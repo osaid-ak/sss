@@ -464,6 +464,16 @@
     text-decoration: line-through; text-decoration-thickness: 1.5px;
     text-decoration-color: var(--gap);
   }
+  .who-line {
+    margin-top: 12px; padding: 8px 8px 4px;
+    border-radius: 8px; background: var(--lineq-soft);
+  }
+  .who-line-head {
+    margin: 0 0 2px;
+    font-size: 11px; font-weight: 800; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--lineq);
+  }
+  .who-line .who-time { margin-top: 7px; }
   .day-offs { display: flex; flex-wrap: wrap; gap: 2px 8px; margin-top: 2px; }
   .day-offs .who-off { font-size: 11px; }
 
@@ -3851,7 +3861,26 @@
       const off = away.has(p.name);
       html += `<div class="who-person ${off ? "off" : "q-" + weekTone(p)}"><button type="button" data-filter-name="${esc(p.name)}">${esc(p.name)}</button></div>`;
     });
+    html += weekLineHtml(day, shown);
     return `<div class="who">${html}</div>`;
+  }
+  function weekLineHtml(day, shown) {
+    const names = new Set(shown.map(p => p.name));
+    const bars = (day.lineBars || []).filter(b => names.has(b.owner));
+    if (!bars.length) return "";
+    bars.sort((a, b) => a.start - b.start || a.len - b.len || a.owner.localeCompare(b.owner));
+    let html = `<div class="who-line"><div class="who-line-head">Support Line</div>`;
+    let last = "";
+    bars.forEach(b => {
+      const label = slotLabel(b.start) + "–" + slotLabel(b.start + b.len);
+      if (label !== last) {
+        html += `<div class="who-time">${esc(label)}</div>`;
+        last = label;
+      }
+      const off = day.away.has(b.owner);
+      html += `<div class="who-person ${off ? "off" : "q-line"}"><button type="button" data-filter-name="${esc(b.owner)}">${esc(b.owner)}</button></div>`;
+    });
+    return html + "</div>";
   }
   function renderWeek() {
     const start = mondayOf(ui.cursor);
