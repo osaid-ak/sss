@@ -464,14 +464,16 @@
     text-decoration: line-through; text-decoration-thickness: 1.5px;
     text-decoration-color: var(--gap);
   }
-  .who-line { margin-top: 12px; }
-  .who-line-head {
-    margin: 0 0 2px; padding: 3px 7px;
-    border-radius: 8px; background: var(--lineq-soft); color: var(--lineq);
-    display: flex; justify-content: space-between; align-items: center;
-    font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
+  .who-line {
+    margin-top: 16px; padding-top: 12px;
+    border-top: 1px solid var(--line);
   }
-  .who-line .who-time { margin-top: 6px; background: var(--lineq-soft); color: var(--lineq); }
+  .who-line-head {
+    margin: 0 0 8px;
+    font-size: 11px; font-weight: 800; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--lineq);
+  }
+  .who-line .who-time { margin-top: 8px; background: var(--lineq-soft); color: var(--lineq); }
   .day-offs { display: flex; flex-wrap: wrap; gap: 2px 8px; margin-top: 2px; }
   .day-offs .who-off { font-size: 11px; }
 
@@ -3870,17 +3872,13 @@
     const bars = (day.lineBars || []).filter(b => names.has(b.owner));
     if (!bars.length) return "";
     bars.sort((a, b) => a.start - b.start || a.len - b.len || a.owner.localeCompare(b.owner));
-    let html = `<div class="who-line"><div class="who-line-head"><span>Support Line</span><span>${bars.length}</span></div>`;
+    let html = `<div class="who-line"><div class="who-line-head">Support Line</div>`;
     let i = 0;
     while (i < bars.length) {
-      const label = slotLabel(bars[i].start) + "–" + slotLabel(bars[i].start + bars[i].len);
+      const start = bars[i].start;
       let j = i + 1;
-      while (j < bars.length) {
-        const next = slotLabel(bars[j].start) + "–" + slotLabel(bars[j].start + bars[j].len);
-        if (next !== label) break;
-        j++;
-      }
-      html += `<div class="who-time"><span>${esc(label)}</span><span>${j - i}</span></div>`;
+      while (j < bars.length && bars[j].start === start) j++;
+      html += `<div class="who-time"><span>${esc(slotLabel(start))}</span><span>${j - i}</span></div>`;
       for (; i < j; i++) {
         const off = day.away.has(bars[i].owner);
         html += `<div class="who-person ${off ? "off" : "q-line"}"><button type="button" data-filter-name="${esc(bars[i].owner)}">${esc(bars[i].owner)}</button></div>`;
@@ -3909,7 +3907,6 @@
           : weekWhoHtml(day, shown);
       html += `<article class="card week-col ${sameDay(d, today) ? "today" : ""} ${isPastNight(d, today) ? "past" : ""} ${dim ? "dim" : toneClass(cov)}" data-open-day="${key}">
         <h3>${DOW[i]} <b>${d.getDate()}</b></h3>
-        ${dim ? "" : chipsHtml(cov)}
         ${who}
       </article>`;
     }
