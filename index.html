@@ -799,6 +799,7 @@
 <script>
 (function () {
   const STORAGE_KEY = "coverage-calendar-v1";
+  const TEAM_JOIN_KEY = "coverage-calendar-joined";
   const TEAM_BASE = "https://crudcrud.com/api/6ecf9d8391d546b7976fbca2b37e0ef7/plan";
   const THEME_KEY = "coverage-calendar-theme";
   const LEAD_PIN = "Theleads";
@@ -1324,6 +1325,47 @@
     if (!Array.isArray(list) || !list.length) return null;
     return list.slice().sort((a, b) => String(a.updatedAt || "").localeCompare(String(b.updatedAt || ""))).pop();
   }
+  function hasJoinedTeam() {
+    try { return localStorage.getItem(TEAM_JOIN_KEY) === "1"; } catch (_) { return false; }
+  }
+  function markJoinedTeam() {
+    try { localStorage.setItem(TEAM_JOIN_KEY, "1"); } catch (_) {}
+  }
+  function parseTeamCalendar(doc) {
+    let calendar = doc && doc.calendar;
+    if (typeof calendar === "string") {
+      try { calendar = JSON.parse(calendar); } catch (_) { return null; }
+    }
+    return calendar && typeof calendar === "object" ? calendar : null;
+  }
+  function mergeTeamCalendar(remote, local) {
+    const out = JSON.parse(JSON.stringify(remote || {}));
+    const mine = JSON.parse(JSON.stringify(local || {}));
+    const people = new Map((out.people || []).filter(p => p && p.name).map(p => [p.name, p]));
+    (mine.people || []).forEach(p => { if (p && p.name) people.set(p.name, p); });
+    if (people.size) out.people = [...people.values()];
+    const bars = new Map((out.lineBars || []).filter(b => b && b.owner).map(b => [b.owner, b]));
+    (mine.lineBars || []).forEach(b => { if (b && b.owner) bars.set(b.owner, b); });
+    if (bars.size) out.lineBars = [...bars.values()];
+    const leaves = Array.isArray(out.leaves) ? out.leaves.slice() : [];
+    (mine.leaves || []).forEach(item => {
+      if (!item) return;
+      const at = leaves.findIndex(x => x && item.id && x.id === item.id);
+      if (at >= 0) leaves[at] = item;
+      else leaves.push(item);
+    });
+    out.leaves = leaves;
+    const holidays = Array.isArray(out.holidays) ? out.holidays.slice() : [];
+    (mine.holidays || []).forEach(item => {
+      if (!item) return;
+      const at = holidays.findIndex(x => x && item.id && x.id === item.id);
+      if (at >= 0) holidays[at] = item;
+      else holidays.push(item);
+    });
+    out.holidays = holidays;
+    out.days = Object.assign({}, out.days || {}, mine.days || {});
+    return out;
+  }
   function scheduleTeamPush() {
     if (openedFromSnapshot) return;
     clearTimeout(teamTimer);
@@ -1342,7 +1384,7 @@
     data.updatedAt = doc.updatedAt || "";
     writeLocalPlan();
     teamQuiet = false;
-    setTeamStatus("Live with the team", "ok");
+    setTeamStatus("Updated from a teammate", "ok");
     render();
   }
   function considerTeam(doc) {
@@ -1407,24 +1449,38 @@
     const res = await fetch(TEAM_BASE, { cache: "no-store" });
     if (!res.ok) throw new Error("team read failed");
     const doc = newestTeam(await res.json());
+    if (!hasJoinedTeam() && hadLocalPlan) {
+      const remoteCal = parseTeamCalendar(doc);
+      if (remoteCal) data = sanitizeData(mergeTeamCalendar(remoteCal, data));
+      data.pin = LEAD_PIN;
+      data.updatedAt = new Date().toISOString();
+      writeLocalPlan();
+      markJoinedTeam();
+      scheduleTeamPush();
+      setTeamStatus("Live with the team", "ok");
+      render();
+      return;
+    }
     if (!doc || !doc.calendar) {
       if (hadLocalPlan || data.updatedAt) {
         if (!data.updatedAt) {
           data.updatedAt = new Date().toISOString();
           writeLocalPlan();
         }
+        markJoinedTeam();
         scheduleTeamPush();
       } else setTeamStatus("Waiting for the team", "wait");
       return;
     }
     considerTeam(doc);
+    markJoinedTeam();
   }
   function startTeamSync() {
     const run = () => pullTeam().catch(() => setTeamStatus("Saved on this browser"));
     run();
     setInterval(() => {
       if (document.visibilityState === "visible") run();
-    }, 20000);
+    }, 8000);
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") run();
     });
