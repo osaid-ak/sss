@@ -800,8 +800,9 @@
 <script>
 (function () {
   const STORAGE_KEY = "coverage-calendar-v1";
-  const TEAM_JOIN_KEY = "coverage-calendar-joined";
-  const TEAM_BASE = "https://crudcrud.com/api/6ecf9d8391d546b7976fbca2b37e0ef7/plan";
+  const TEAM_SYNC_KEY = "coverage-calendar-sync-base";
+  const TEAM_PLAN = "https://mantledb.sh/v2/sss-e7b1c4a9d2f6/plan";
+  const TEAM_CHUNK = 20000;
   const THEME_KEY = "coverage-calendar-theme";
   const LEAD_PIN = "Theleads";
   const WEEKEND_SHEET_ID = "1k-2i2LNA_tnsEQVghJvVH7F16-8C8HxvUFwIe3RZ7IM";
@@ -1351,6 +1352,8 @@
   let teamTimer = 0;
   let teamPushing = false;
   let teamQueued = false;
+  let teamPollTimer = 0;
+  let teamPollMs = 20000;
   function setTeamStatus(text, kind) {
     const el = document.getElementById("teamLive");
     if (!el) return;
@@ -1361,174 +1364,248 @@
     data.pin = LEAD_PIN;
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (_) {}
   }
-  function teamBody() {
+  function calendarCopy() {
     const calendar = JSON.parse(JSON.stringify(data));
     delete calendar.pin;
-    return { version: 1, updatedAt: data.updatedAt || "", calendar: JSON.stringify(calendar) };
+    return calendar;
   }
-  function newestTeam(list) {
-    if (!Array.isArray(list) || !list.length) return null;
-    return list.slice().sort((a, b) => String(a.updatedAt || "").localeCompare(String(b.updatedAt || ""))).pop();
+  function contentOf(calendar) {
+    const copy = JSON.parse(JSON.stringify(calendar || {}));
+    delete copy.pin;
+    delete copy.updatedAt;
+    return JSON.stringify(copy);
   }
-  function hasJoinedTeam() {
-    try { return localStorage.getItem(TEAM_JOIN_KEY) === "1"; } catch (_) { return false; }
+  function readSyncBase() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(TEAM_SYNC_KEY) || "null");
+      return saved && saved.calendar ? saved : null;
+    } catch (_) { return null; }
   }
-  function markJoinedTeam() {
-    try { localStorage.setItem(TEAM_JOIN_KEY, "1"); } catch (_) {}
+  function writeSyncBase(calendar, updatedAt) {
+    try {
+      localStorage.setItem(TEAM_SYNC_KEY, JSON.stringify({ updatedAt: updatedAt || "", calendar }));
+    } catch (_) {}
   }
-  function parseTeamCalendar(doc) {
-    let calendar = doc && doc.calendar;
-    if (typeof calendar === "string") {
-      try { calendar = JSON.parse(calendar); } catch (_) { return null; }
-    }
-    return calendar && typeof calendar === "object" ? calendar : null;
+  function sameJson(a, b) {
+    return JSON.stringify(a) === JSON.stringify(b);
   }
-  function mergeTeamCalendar(remote, local) {
-    const out = JSON.parse(JSON.stringify(remote || {}));
-    const mine = JSON.parse(JSON.stringify(local || {}));
-    const people = new Map((out.people || []).filter(p => p && p.name).map(p => [p.name, p]));
-    (mine.people || []).forEach(p => { if (p && p.name) people.set(p.name, p); });
-    if (people.size) out.people = [...people.values()];
-    const bars = new Map((out.lineBars || []).filter(b => b && b.owner).map(b => [b.owner, b]));
-    (mine.lineBars || []).forEach(b => { if (b && b.owner) bars.set(b.owner, b); });
-    if (bars.size) out.lineBars = [...bars.values()];
-    const leaves = Array.isArray(out.leaves) ? out.leaves.slice() : [];
-    (mine.leaves || []).forEach(item => {
-      if (!item) return;
-      const at = leaves.findIndex(x => x && item.id && x.id === item.id);
-      if (at >= 0) leaves[at] = item;
-      else leaves.push(item);
+  function pickField(base, remote, local, remoteAt, localAt) {
+    const localChanged = !sameJson(local, base);
+    const remoteChanged = !sameJson(remote, base);
+    if (localChanged && remoteChanged) return String(localAt) >= String(remoteAt) ? local : remote;
+    if (localChanged) return local;
+    if (remoteChanged) return remote;
+    return remote !== undefined ? remote : local;
+  }
+  function mergeRecords(base, remote, local, remoteAt, localAt, keyFn) {
+    const baseMap = new Map();
+    const remoteMap = new Map();
+    const localMap = new Map();
+    (base || []).forEach(item => { const key = keyFn(item); if (key) baseMap.set(key, item); });
+    (remote || []).forEach(item => { const key = keyFn(item); if (key) remoteMap.set(key, item); });
+    (local || []).forEach(item => { const key = keyFn(item); if (key) localMap.set(key, item); });
+    const order = [];
+    const seen = new Set();
+    [...(remote || []), ...(local || []), ...(base || [])].forEach(item => {
+      const key = keyFn(item);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      order.push(key);
     });
-    out.leaves = leaves;
-    const holidays = Array.isArray(out.holidays) ? out.holidays.slice() : [];
-    (mine.holidays || []).forEach(item => {
-      if (!item) return;
-      const at = holidays.findIndex(x => x && item.id && x.id === item.id);
-      if (at >= 0) holidays[at] = item;
-      else holidays.push(item);
+    const out = [];
+    order.forEach(key => {
+      const chosen = pickField(baseMap.get(key), remoteMap.get(key), localMap.get(key), remoteAt, localAt);
+      if (chosen !== undefined) out.push(chosen);
     });
-    out.holidays = holidays;
-    out.days = Object.assign({}, out.days || {}, mine.days || {});
-    out.dst = typeof mine.dst === "boolean" ? mine.dst : !!out.dst;
     return out;
+  }
+  function mergeDays(base, remote, local, remoteAt, localAt) {
+    const keys = new Set([
+      ...Object.keys(base || {}),
+      ...Object.keys(remote || {}),
+      ...Object.keys(local || {})
+    ]);
+    const out = {};
+    keys.forEach(key => {
+      const chosen = pickField(base && base[key], remote && remote[key], local && local[key], remoteAt, localAt);
+      if (chosen !== undefined) out[key] = chosen;
+    });
+    return out;
+  }
+  function preparedCalendar(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const copy = sanitizeData(JSON.parse(JSON.stringify(raw)));
+    delete copy.pin;
+    return copy;
+  }
+  function mergeTeam(base, remote, local, remoteAt, localAt) {
+    return {
+      people: mergeRecords(base && base.people, remote && remote.people, local && local.people, remoteAt, localAt, item => item && item.name),
+      lineBars: mergeRecords(base && base.lineBars, remote && remote.lineBars, local && local.lineBars, remoteAt, localAt, item => item && item.owner),
+      leaves: mergeRecords(base && base.leaves, remote && remote.leaves, local && local.leaves, remoteAt, localAt, item => item && item.id),
+      holidays: mergeRecords(base && base.holidays, remote && remote.holidays, local && local.holidays, remoteAt, localAt, item => item && item.id),
+      days: mergeDays(base && base.days, remote && remote.days, local && local.days, remoteAt, localAt),
+      dst: pickField(base && base.dst, remote && remote.dst, local && local.dst, remoteAt, localAt) === true
+    };
+  }
+  function teamBusy(status) {
+    const error = new Error("team " + status);
+    if (status === 429) error.busy = true;
+    return error;
+  }
+  async function readTeam() {
+    const res = await fetch(TEAM_PLAN, { cache: "no-store" });
+    if (res.status === 404) return null;
+    if (!res.ok) throw teamBusy(res.status);
+    const doc = await res.json();
+    if (!doc || doc.error || !doc.updatedAt) return null;
+    if (doc.parts > 1) {
+      let raw = "";
+      for (let i = 0; i < doc.parts; i++) {
+        const part = await fetch(TEAM_PLAN + "/part/" + i, { cache: "no-store" });
+        if (!part.ok) throw teamBusy(part.status);
+        const body = await part.json();
+        raw += body && body.chunk ? body.chunk : "";
+      }
+      doc.calendar = JSON.parse(raw);
+    }
+    if (!doc.calendar || typeof doc.calendar !== "object") return null;
+    return doc;
+  }
+  async function writeTeam(calendar, updatedAt) {
+    const packed = JSON.stringify(calendar);
+    let res;
+    if (packed.length <= 50000) {
+      res = await fetch(TEAM_PLAN, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version: 1, updatedAt, parts: 1, calendar })
+      });
+    } else {
+      const count = Math.ceil(packed.length / TEAM_CHUNK);
+      for (let i = 0; i < count; i++) {
+        const part = await fetch(TEAM_PLAN + "/part/" + i, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chunk: packed.slice(i * TEAM_CHUNK, (i + 1) * TEAM_CHUNK) })
+        });
+        if (!part.ok) throw teamBusy(part.status);
+      }
+      res = await fetch(TEAM_PLAN, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ version: 1, updatedAt, parts: count })
+      });
+    }
+    if (!res.ok) throw teamBusy(res.status);
+  }
+  function screenBusy() {
+    return !!(ui.modal || ui.editing || ui.modalDirty);
   }
   function scheduleTeamPush() {
     if (openedFromSnapshot) return;
     clearTimeout(teamTimer);
-    teamTimer = setTimeout(() => { teamTimer = 0; pushTeam(); }, 700);
+    teamTimer = setTimeout(() => { teamTimer = 0; syncTeam(); }, 700);
   }
   function applyTeamDoc(doc) {
-    let calendar = doc.calendar;
-    if (typeof calendar === "string") {
-      try { calendar = JSON.parse(calendar); } catch (_) { return; }
-    }
-    if (!calendar || typeof calendar !== "object") return;
+    const calendar = preparedCalendar(doc && doc.calendar);
+    if (!calendar) return;
     teamPending = null;
     teamQuiet = true;
-    data = sanitizeData(calendar);
+    data = calendar;
     data.pin = LEAD_PIN;
     data.updatedAt = doc.updatedAt || "";
     writeLocalPlan();
+    writeSyncBase(calendarCopy(), data.updatedAt);
     teamQuiet = false;
     setTeamStatus("Updated from a teammate", "ok");
     render();
   }
-  function considerTeam(doc) {
-    if (!doc || !doc.updatedAt || !doc.calendar) return;
-    const remoteAt = String(doc.updatedAt);
+  async function reconcile(remoteDoc) {
     const localAt = String(data.updatedAt || "");
-    if (remoteAt === localAt) {
+    const localCal = preparedCalendar(calendarCopy());
+    if (!remoteDoc || !remoteDoc.calendar) {
+      if (!hadLocalPlan && !localAt) {
+        setTeamStatus("Waiting for the team", "wait");
+        return;
+      }
+      if (screenBusy()) { teamQueued = true; setTeamStatus("Reconnecting", "wait"); return; }
+      if (!data.updatedAt) {
+        data.updatedAt = new Date().toISOString();
+        writeLocalPlan();
+      }
+      await writeTeam(calendarCopy(), data.updatedAt);
+      writeSyncBase(calendarCopy(), data.updatedAt);
       setTeamStatus("Live with the team", "ok");
       return;
     }
-    if (remoteAt < localAt) {
-      scheduleTeamPush();
+    const remoteAt = String(remoteDoc.updatedAt);
+    const remoteCal = preparedCalendar(remoteDoc.calendar);
+    const baseWrap = readSyncBase();
+    const baseCal = baseWrap && baseWrap.calendar ? preparedCalendar(baseWrap.calendar) : null;
+    const merged = preparedCalendar(mergeTeam(baseCal, remoteCal, localCal, remoteAt, localAt));
+    const mergedJson = contentOf(merged);
+    const remoteJson = contentOf(remoteCal);
+    const localJson = contentOf(localCal);
+    if (mergedJson === remoteJson && mergedJson === localJson) {
+      if (localAt !== remoteAt) {
+        data.updatedAt = localAt > remoteAt ? localAt : remoteAt;
+        writeLocalPlan();
+      }
+      writeSyncBase(calendarCopy(), data.updatedAt);
+      setTeamStatus("Live with the team", "ok");
       return;
     }
-    if (ui.modal || ui.editing || teamTimer || teamPushing) {
-      teamPending = doc;
+    if (screenBusy()) {
+      teamPending = { updatedAt: remoteAt, calendar: remoteCal, merge: mergedJson !== remoteJson };
+      teamQueued = mergedJson !== remoteJson || localAt > remoteAt;
       setTeamStatus("Teammate update waiting", "wait");
       return;
     }
-    applyTeamDoc(doc);
-  }
-  async function pushTeamOnce() {
-    const listed = await fetch(TEAM_BASE, { cache: "no-store" });
-    if (!listed.ok) throw new Error("team read failed");
-    const remote = newestTeam(await listed.json());
-    if (remote && remote.updatedAt && remote.updatedAt > (data.updatedAt || "")) {
-      considerTeam(remote);
+    if (mergedJson === remoteJson) {
+      applyTeamDoc({ updatedAt: remoteAt, calendar: remoteCal });
       return;
     }
-    const body = JSON.stringify(teamBody());
-    const res = remote && remote._id
-      ? await fetch(TEAM_BASE + "/" + remote._id, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body
-        })
-      : await fetch(TEAM_BASE, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body
-        });
-    if (!res.ok) throw new Error("team write failed");
+    const at = mergedJson === localJson && localAt >= remoteAt ? (localAt || new Date().toISOString()) : new Date().toISOString();
+    teamQuiet = true;
+    data = merged;
+    data.pin = LEAD_PIN;
+    data.updatedAt = at;
+    writeLocalPlan();
+    teamQuiet = false;
+    await writeTeam(calendarCopy(), at);
+    writeSyncBase(calendarCopy(), at);
     setTeamStatus("Live with the team", "ok");
+    if (mergedJson !== localJson) render();
   }
-  async function pushTeam() {
+  async function syncTeam() {
     if (openedFromSnapshot) return;
     if (teamPushing) { teamQueued = true; return; }
+    if (screenBusy()) { teamQueued = true; return; }
     teamPushing = true;
     try {
       do {
         teamQueued = false;
-        await pushTeamOnce();
-      } while (teamQueued);
-    } catch (_) {
-      setTeamStatus("Saved on this browser");
+        await reconcile(await readTeam());
+      } while (teamQueued && !screenBusy());
+      teamPollMs = 20000;
+    } catch (error) {
+      teamPollMs = error && error.busy ? 90000 : 20000;
+      setTeamStatus("Reconnecting", "wait");
     } finally {
       teamPushing = false;
     }
   }
-  async function pullTeam() {
-    if (openedFromSnapshot) return;
-    const res = await fetch(TEAM_BASE, { cache: "no-store" });
-    if (!res.ok) throw new Error("team read failed");
-    const doc = newestTeam(await res.json());
-    if (!hasJoinedTeam() && hadLocalPlan) {
-      const remoteCal = parseTeamCalendar(doc);
-      if (remoteCal) data = sanitizeData(mergeTeamCalendar(remoteCal, data));
-      data.pin = LEAD_PIN;
-      data.updatedAt = new Date().toISOString();
-      writeLocalPlan();
-      markJoinedTeam();
-      scheduleTeamPush();
-      setTeamStatus("Live with the team", "ok");
-      render();
-      return;
-    }
-    if (!doc || !doc.calendar) {
-      if (hadLocalPlan || data.updatedAt) {
-        if (!data.updatedAt) {
-          data.updatedAt = new Date().toISOString();
-          writeLocalPlan();
-        }
-        markJoinedTeam();
-        scheduleTeamPush();
-      } else setTeamStatus("Waiting for the team", "wait");
-      return;
-    }
-    considerTeam(doc);
-    markJoinedTeam();
-  }
   function startTeamSync() {
-    const run = () => pullTeam().catch(() => setTeamStatus("Saved on this browser"));
+    const run = () => { if (document.visibilityState === "visible") syncTeam(); };
     run();
-    setInterval(() => {
-      if (document.visibilityState === "visible") run();
-    }, 8000);
+    const tick = () => {
+      clearTimeout(teamPollTimer);
+      teamPollTimer = setTimeout(() => { run(); tick(); }, teamPollMs);
+    };
+    tick();
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") run();
+      if (document.visibilityState === "visible") syncTeam();
     });
   }
   function persist() {
@@ -3567,10 +3644,9 @@
   }
 
   function render() {
-    if (teamPending && !ui.modal && !ui.editing && !teamTimer && !teamPushing) {
-      const doc = teamPending;
+    if ((teamPending || teamQueued) && !screenBusy() && !teamTimer && !teamPushing) {
       teamPending = null;
-      applyTeamDoc(doc);
+      syncTeam();
       return;
     }
     const nav = navParts();
