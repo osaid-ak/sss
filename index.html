@@ -1001,7 +1001,7 @@
     return {
       version: 1,
       slotOrigin: START_MIN,
-      pin: "lead",
+      pin: "Theleads",
       people: clone(DEFAULT_PEOPLE),
       lineBars: clone(DEFAULT_LINE),
       leaves: [],
@@ -1168,7 +1168,6 @@
     const oldOrigin = Number.isFinite(raw.slotOrigin) ? raw.slotOrigin : OLD_SLOT_ORIGIN;
     shiftStoredSlots(raw, (oldOrigin - START_MIN) / SLOT_MIN);
     d.slotOrigin = START_MIN;
-    if (typeof raw.pin === "string" && raw.pin) d.pin = raw.pin;
     if (Array.isArray(raw.people) && raw.people.length) {
       d.people = raw.people.map((p, i) => sanitizePerson(p, DEFAULT_PEOPLE[i] || DEFAULT_PEOPLE[0]));
     }
