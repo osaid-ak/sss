@@ -781,6 +781,7 @@
   </div>
 </div>
 <input id="fileIn" type="file" accept="application/json" class="hidden">
+<input id="hpFileIn" type="file" accept=".csv,.tsv,.txt,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
 <script id="coverage-snapshot" type="application/json">null</script>
 <script>
 (function () {
@@ -1466,7 +1467,7 @@
     }
     return weekends;
   }
-  function parseCsvRows(text) {
+  function parseDelimitedRows(text, sep) {
     const rows = [];
     let row = [];
     let cell = "";
@@ -1478,12 +1479,15 @@
         else if (ch === "\"") quoted = false;
         else cell += ch;
       } else if (ch === "\"") quoted = true;
-      else if (ch === ",") { row.push(cell); cell = ""; }
+      else if (ch === sep) { row.push(cell); cell = ""; }
       else if (ch === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; }
       else if (ch !== "\r") cell += ch;
     }
     if (cell || row.length) { row.push(cell); rows.push(row); }
     return rows.map(r => r.map(v => String(v || "").replace(/\n/g, " ").trim()));
+  }
+  function parseCsvRows(text) {
+    return parseDelimitedRows(text, ",");
   }
   function gvizCellText(cell) {
     if (!cell) return "";
@@ -2264,6 +2268,8 @@
         const m = plannerCellMark(plan, key, name);
         if (m === "closed" || m === "off") return "OFF";
         if (m === "pto") return "PTO";
+        const h = plan.hours && plan.hours[key] && plan.hours[key][name];
+        if (h) return slotLabel(h.start) + "–" + slotLabel(h.end);
         return "";
       };
       const c = holidayCounts(plan, key, cols);
@@ -2311,6 +2317,320 @@
     }).catch(() => {
       if (btn) btn.textContent = "Copy failed";
       setTimeout(() => { if (btn && btn.isConnected) btn.textContent = label; }, 1600);
+    });
+  }
+  function holidaySkipHeader(raw) {
+    return /^(date|phase\s*1|p1|vip|total|#|count)?$/i.test(String(raw || "").trim());
+  }
+  function holidayTemplateRows(plan) {
+    const cols = holidayColumns();
+    const header = ["Date"].concat(cols.p1.map(p => p.name), ["Phase 1"], cols.vip.map(p => p.name), ["VIP", "Total"]);
+    const rows = [
+      ["Plan name", plan.name || "Holiday plan"],
+      ["From", plan.start],
+      ["To", plan.end],
+      ["How to fill", "Blank = working default hours. OFF = holiday rotation. PTO = leave. Optional coverage hours like 5pm-2am."],
+      [],
+      header
+    ];
+    keysInRange(plan.start, plan.end).forEach(key => {
+      const mark = (name) => {
+        if (isClosedDay(key)) return "OFF";
+        const covering = weekendCoverNames(key);
+        if (covering && !covering.has(name)) return "OFF";
+        if (onLeave(name, key)) return "PTO";
+        return "";
+      };
+      const c = holidayCounts(plan, key, cols);
+      rows.push([holidayDateLabel(key) + (isClosedDay(key) ? " · closed" : "")]
+        .concat(cols.p1.map(p => mark(p.name)), [isClosedDay(key) ? 0 : c.p1], cols.vip.map(p => mark(p.name)), [isClosedDay(key) ? 0 : c.vip, isClosedDay(key) ? 0 : c.total]));
+    });
+    return rows;
+  }
+  function xmlEsc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function holidayTemplateXls(rows) {
+    const body = rows.map(row => {
+      const cells = (row.length ? row : [""]).map(cell => {
+        const text = String(cell == null ? "" : cell);
+        const type = /^-?\d+(\.\d+)?$/.test(text) && text !== "" ? "Number" : "String";
+        return `<Cell><Data ss:Type="${type}">${xmlEsc(text)}</Data></Cell>`;
+      }).join("");
+      return `<Row>${cells}</Row>`;
+    }).join("");
+    return `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+<Worksheet ss:Name="Holiday plan"><Table>${body}</Table></Worksheet>
+</Workbook>`;
+  }
+  function holidayTemplateFileName(plan, ext) {
+    const file = (plan.name || "holiday-plan").replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "-").toLowerCase() || "holiday-plan";
+    return file + "-template." + ext;
+  }
+  function downloadHolidayTemplate(plan) {
+    const rows = holidayTemplateRows(plan);
+    download(holidayTemplateFileName(plan, "csv"), "\uFEFF" + rows.map(row => row.map(cell => sheetEscape(cell, ",")).join(",")).join("\r\n"), "text/csv;charset=utf-8");
+    setTimeout(() => {
+      download(holidayTemplateFileName(plan, "xls"), holidayTemplateXls(rows), "application/vnd.ms-excel");
+    }, 250);
+  }
+  function clockToMins(raw) {
+    const t = String(raw || "").toLowerCase().replace(/\./g, "").replace(/\s+/g, "");
+    const m = t.match(/^(\d{1,2})(?::(\d{2}))?(am|pm)?$/);
+    if (!m) return null;
+    let hr = Number(m[1]);
+    const mn = Number(m[2] || 0);
+    if (mn > 59 || hr > 23) return null;
+    const ap = m[3];
+    if (ap === "pm" && hr < 12) hr += 12;
+    if (ap === "am" && hr === 12) hr = 0;
+    if (!ap && hr > 24) return null;
+    return hr * 60 + mn;
+  }
+  function minsToNightSlot(mins) {
+    let m = ((mins % (24 * 60)) + 24 * 60) % (24 * 60);
+    if (m < START_MIN) m += 24 * 60;
+    return clamp(Math.round((m - START_MIN) / SLOT_MIN), 0, SLOTS);
+  }
+  function parseHolidayHoursCell(raw) {
+    const t = String(raw || "").replace(/\s+/g, " ").trim();
+    if (!t) return null;
+    const parts = t.split(/\s*(?:-|–|—|to)\s*/i);
+    if (parts.length !== 2) return null;
+    const a = clockToMins(parts[0]);
+    const b = clockToMins(parts[1]);
+    if (a == null || b == null) return null;
+    const start = minsToNightSlot(a);
+    let end = minsToNightSlot(b);
+    if (end <= start) end = Math.min(SLOTS, start + Math.max(2, DEFAULT_PEOPLE[0] ? DEFAULT_PEOPLE[0].len : 18));
+    if (end <= start) return null;
+    return { start, end };
+  }
+  function parseHolidayMarkCell(raw) {
+    const t = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim();
+    if (!t) return { mark: "", hours: null };
+    const u = t.toUpperCase();
+    if (/^(OFF|HOLIDAY|ROTATION|CLOSED|AWAY)$/.test(u)) return { mark: "off", hours: null };
+    if (/^(PTO|LEAVE|OOO|AL|VL)$/.test(u)) return { mark: "pto", hours: null };
+    if (/^(ON|WORK|WORKING|YES)$/.test(u)) return { mark: "", hours: null };
+    const hours = parseHolidayHoursCell(t);
+    if (hours) return { mark: "", hours };
+    return { mark: "", hours: null, unknown: t };
+  }
+  function parseHolidayDateCell(raw, yearHint) {
+    const text = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim();
+    if (!text) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+    const iso = text.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (iso) return iso[1];
+    if (/^\d+(\.0+)?$/.test(text)) {
+      const n = Number(text);
+      if (n > 20000 && n < 80000) {
+        const d = new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 86400000);
+        return dateKey(new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+      }
+    }
+    const cleaned = text.replace(/\s*·.*$/, "").replace(/,/g, " ").replace(/\s+/g, " ").trim();
+    const months = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+    let m = cleaned.match(/^(?:[A-Za-z]{3,9}\s+)?([A-Za-z]{3,9})\s+(\d{1,2})(?:\s+(\d{4}))?$/);
+    if (m && months[m[1].slice(0, 3).toLowerCase()] != null) {
+      const year = m[3] ? Number(m[3]) : yearHint;
+      if (!year) return null;
+      return dateKey(new Date(year, months[m[1].slice(0, 3).toLowerCase()], Number(m[2])));
+    }
+    m = cleaned.match(/^(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})$/);
+    if (m && months[m[2].slice(0, 3).toLowerCase()] != null) {
+      return dateKey(new Date(Number(m[3]), months[m[2].slice(0, 3).toLowerCase()], Number(m[1])));
+    }
+    m = cleaned.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+    if (m) {
+      let a = Number(m[1]), b = Number(m[2]), y = Number(m[3]);
+      if (y < 100) y += 2000;
+      if (a > 12) return dateKey(new Date(y, b - 1, a));
+      if (b > 12) return dateKey(new Date(y, a - 1, b));
+      return dateKey(new Date(y, a - 1, b));
+    }
+    return null;
+  }
+  function detectDelim(text) {
+    const sample = text.split(/\r?\n/).slice(0, 10).join("\n");
+    const tabs = (sample.match(/\t/g) || []).length;
+    const commas = (sample.match(/,/g) || []).length;
+    const semis = (sample.match(/;/g) || []).length;
+    if (tabs >= commas && tabs >= semis && tabs > 0) return "\t";
+    if (semis > commas) return ";";
+    return ",";
+  }
+  function parseSpreadsheetMlRows(text) {
+    const doc = new DOMParser().parseFromString(text, "text/xml");
+    if (doc.querySelector("parsererror")) throw new Error("Could not read that Excel file.");
+    const rows = [];
+    Array.from(doc.getElementsByTagName("*")).filter(el => /:Row$|^Row$/i.test(el.nodeName)).forEach(row => {
+      const cells = [];
+      Array.from(row.childNodes).forEach(node => {
+        if (!node.tagName || !/:Cell$|^Cell$/i.test(node.tagName)) return;
+        const idx = node.getAttribute("ss:Index") || node.getAttribute("Index");
+        let val = "";
+        Array.from(node.getElementsByTagName("*")).forEach(child => {
+          if (/:Data$|^Data$/i.test(child.nodeName)) val = child.textContent || "";
+        });
+        if (idx) {
+          const i = Number(idx) - 1;
+          while (cells.length < i) cells.push("");
+          cells[i] = val;
+        } else cells.push(val);
+      });
+      rows.push(cells.map(v => String(v || "").replace(/\n/g, " ").trim()));
+    });
+    if (!rows.length) throw new Error("That Excel file had no rows.");
+    return rows;
+  }
+  function parseHtmlTableRows(text) {
+    const doc = new DOMParser().parseFromString(text, "text/html");
+    const table = doc.querySelector("table");
+    if (!table) throw new Error("Could not find a table in that file.");
+    return Array.from(table.rows).map(tr => Array.from(tr.cells).map(td => td.textContent.replace(/\s+/g, " ").trim()));
+  }
+  function loadXlsxLibrary() {
+    if (window.XLSX) return Promise.resolve(window.XLSX);
+    return new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js";
+      script.onload = () => window.XLSX ? resolve(window.XLSX) : reject(new Error("Excel reader did not load."));
+      script.onerror = () => reject(new Error("Could not load the Excel reader. Save the sheet as CSV and import that."));
+      document.head.appendChild(script);
+    });
+  }
+  function rowsFromHolidayFile(file) {
+    const name = (file.name || "").toLowerCase();
+    const isZipExcel = name.endsWith(".xlsx") || name.endsWith(".xlsm");
+    const isXls = name.endsWith(".xls");
+    if (isZipExcel || isXls) {
+      return file.arrayBuffer().then(buf => {
+        const bytes = new Uint8Array(buf);
+        const looksZip = bytes[0] === 0x50 && bytes[1] === 0x4B;
+        if (!looksZip) {
+          const text = new TextDecoder("utf-8").decode(bytes);
+          if (text.indexOf("urn:schemas-microsoft-com:office:spreadsheet") >= 0 || text.indexOf("<Workbook") >= 0) {
+            return parseSpreadsheetMlRows(text);
+          }
+          if (/<table/i.test(text)) return parseHtmlTableRows(text);
+        }
+        return loadXlsxLibrary().then(XLSX => {
+          const wb = XLSX.read(buf, { type: "array", cellDates: true });
+          const sheet = wb.Sheets[wb.SheetNames[0]];
+          if (!sheet) throw new Error("That workbook had no sheets.");
+          return XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" }).map(row =>
+            (row || []).map(v => v == null ? "" : String(v).replace(/\n/g, " ").trim())
+          );
+        });
+      });
+    }
+    return file.text().then(text => {
+      const trimmed = String(text || "").replace(/^\uFEFF/, "");
+      if (trimmed.indexOf("urn:schemas-microsoft-com:office:spreadsheet") >= 0 || trimmed.indexOf("<Workbook") >= 0) {
+        return parseSpreadsheetMlRows(trimmed);
+      }
+      if (/<table/i.test(trimmed) && /<td|<th/i.test(trimmed)) return parseHtmlTableRows(trimmed);
+      return parseDelimitedRows(trimmed, detectDelim(trimmed));
+    });
+  }
+  function holidayPlanFromRows(rows, fileName) {
+    const grid = (rows || []).map(r => Array.isArray(r) ? r : []);
+    if (!grid.length) throw new Error("That file was empty.");
+    let planName = "";
+    let from = "";
+    let to = "";
+    let headerIndex = -1;
+    for (let i = 0; i < grid.length; i++) {
+      const row = grid[i];
+      const first = String(row[0] || "").trim();
+      const second = String(row[1] || "").trim();
+      const key = first.toLowerCase().replace(/[:]+$/, "");
+      if ((key === "plan name" || key === "name" || key === "holiday" || key === "plan") && second) planName = second;
+      if ((key === "from" || key === "start") && second) from = parseHolidayDateCell(second, new Date().getFullYear()) || second;
+      if ((key === "to" || key === "end") && second) to = parseHolidayDateCell(second, new Date().getFullYear()) || second;
+      const hits = row.filter(cell => {
+        if (holidaySkipHeader(cell)) return false;
+        return !!matchRosterName(cell) && data.people.some(p => p.name.toLowerCase() === matchRosterName(cell).toLowerCase());
+      }).length;
+      if (hits >= 2) headerIndex = i;
+    }
+    if (headerIndex < 0) throw new Error("Could not find a header row with teammate names. Use Download template, then fill OFF / PTO / hours under each name.");
+    const header = grid[headerIndex];
+    const peopleAt = [];
+    header.forEach((cell, index) => {
+      if (!index || holidaySkipHeader(cell)) return;
+      const name = matchRosterName(cell);
+      if (!name || !data.people.some(p => p.name.toLowerCase() === name.toLowerCase())) return;
+      peopleAt.push({ index, name });
+    });
+    if (!peopleAt.length) throw new Error("None of the header names matched the roster.");
+    let yearHint = from && /^\d{4}/.test(from) ? Number(from.slice(0, 4)) : ui.cursor.getFullYear();
+    let lastMonth = null;
+    const offs = {};
+    const hours = {};
+    const dates = [];
+    const unknown = [];
+    for (let i = headerIndex + 1; i < grid.length; i++) {
+      const row = grid[i];
+      let dateKeyValue = parseHolidayDateCell(row[0], yearHint);
+      if (!dateKeyValue) continue;
+      const month = Number(dateKeyValue.slice(5, 7));
+      if (lastMonth === 12 && month === 1 && !/\d{4}/.test(String(row[0] || ""))) {
+        yearHint = Number(dateKeyValue.slice(0, 4)) + 1;
+        dateKeyValue = yearHint + dateKeyValue.slice(4);
+      }
+      lastMonth = month;
+      dates.push(dateKeyValue);
+      peopleAt.forEach(col => {
+        const parsed = parseHolidayMarkCell(row[col.index]);
+        if (parsed.unknown) unknown.push(col.name + " " + dateKeyValue);
+        if (parsed.mark === "off" || parsed.mark === "pto") {
+          if (!offs[dateKeyValue]) offs[dateKeyValue] = {};
+          offs[dateKeyValue][col.name] = parsed.mark;
+        }
+        if (parsed.hours) {
+          if (!hours[dateKeyValue]) hours[dateKeyValue] = {};
+          hours[dateKeyValue][col.name] = parsed.hours;
+        }
+      });
+    }
+    if (!dates.length) throw new Error("Could not read any dates. Put dates in the first column, like Wed, Dec 24 or 2026-12-24.");
+    dates.sort();
+    const start = from && /^\d{4}-\d{2}-\d{2}$/.test(from) ? from : dates[0];
+    const end = to && /^\d{4}-\d{2}-\d{2}$/.test(to) ? to : dates[dates.length - 1];
+    const base = (fileName || "").replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim();
+    const plan = sanitizeHolidayPlan({
+      name: planName || base || "Imported holiday plan",
+      start,
+      end,
+      offs,
+      hours,
+      status: "in_progress"
+    });
+    seedHolidayOffs(plan);
+    plan.createdAt = new Date().toISOString();
+    plan.savedAt = new Date().toISOString();
+    return { plan, people: peopleAt.length, days: dates.length, unknown };
+  }
+  function importHolidayPlanFile(file) {
+    return rowsFromHolidayFile(file).then(rows => {
+      const result = holidayPlanFromRows(rows, file.name);
+      if (!Array.isArray(data.holidays)) data.holidays = [];
+      data.holidays.push(result.plan);
+      ui.holidayId = result.plan.id;
+      ui.holidayDate = null;
+      persist();
+      refreshHolidayModal();
+      const extra = result.unknown.length ? " Skipped " + result.unknown.length + " cell" + (result.unknown.length === 1 ? "" : "s") + " that were not OFF, PTO, or hours." : "";
+      alert("Imported “" + result.plan.name + "” as an in-progress plan (" + result.people + " people, " + result.days + " days). Review it here, then Confirm holidays when it should go live." + extra);
+    }).catch(err => {
+      alert(err && err.message ? err.message : "Could not import that holiday plan.");
     });
   }
   function refreshHolidayModal() {
@@ -4559,7 +4879,7 @@
       const savedAt = plan.savedAt ? new Date(plan.savedAt).toLocaleString() : "Not saved yet";
       const live = plan.status === "confirmed";
       box.innerHTML = `<h2>Plan a holiday</h2>
-        <p class="hp-hint">Click a cell to cycle Working → OFF (holiday rotation) → PTO (leave). Use the arrow to open that day’s PKT planner. Sundays stay closed. Overnight hours belong to the start day. In-progress plans stay off the calendar until you confirm them.</p>
+        <p class="hp-hint">Click a cell to cycle Working → OFF (holiday rotation) → PTO (leave). Use the arrow to open that day’s PKT planner. Download a CSV/Excel template, fill names and coverage, then Import plan. Sundays stay closed. Overnight hours belong to the start day. In-progress plans stay off the calendar until you confirm them.</p>
         <div class="hp-status ${live ? "confirmed" : "in_progress"}">${live ? "Confirmed · live on the calendar" : "In progress · not on the calendar"}</div>
         <div class="hp-toolbar">
           <label class="grow">Plan name<input id="hpName" value="${esc(plan.name)}"></label>
@@ -4570,6 +4890,8 @@
           <button type="button" class="ghost" id="hpSave">Save</button>
           <button type="button" class="ghost" id="hpCopy">Copy for sheet</button>
           <button type="button" class="primary" id="hpExport">Export for Google Sheets</button>
+          <button type="button" class="ghost" id="hpTemplate">Download template</button>
+          <button type="button" class="ghost" id="hpImport">Import plan</button>
         </div>
         <div class="hp-tools">
           ${live ? `<button type="button" class="ghost" id="hpDraft">Move to in progress</button>` : `<button type="button" class="primary" id="hpConfirm">Confirm holidays</button>`}
@@ -4842,6 +5164,8 @@
       });
       box.querySelector("#hpCopy").addEventListener("click", e => copyHolidayPlan(planOf(), e.currentTarget));
       box.querySelector("#hpExport").addEventListener("click", () => exportHolidayPlan(planOf()));
+      box.querySelector("#hpTemplate").addEventListener("click", () => downloadHolidayTemplate(planOf()));
+      box.querySelector("#hpImport").addEventListener("click", () => document.getElementById("hpFileIn").click());
       const confirmBtn = box.querySelector("#hpConfirm");
       if (confirmBtn) confirmBtn.addEventListener("click", () => {
         confirmHolidayPlan(planOf());
@@ -5018,6 +5342,12 @@
   });
   document.getElementById("snapshotBtn").addEventListener("click", saveSnapshot);
   document.getElementById("importBtn").addEventListener("click", () => document.getElementById("fileIn").click());
+  document.getElementById("hpFileIn").addEventListener("change", e => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    importHolidayPlanFile(file);
+  });
   document.getElementById("fileIn").addEventListener("change", e => {
     const file = e.target.files[0];
     e.target.value = "";
