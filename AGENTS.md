@@ -37,7 +37,7 @@ Saturday names come from the Weekend Cover sheet (Planned, then Swap). The sheet
 - Away is a separate multi-select for Off and PTO. Nothing is selected by default, so everyone shows. Select all checks both and shows only those people. Off is the holiday rotation. PTO is holiday PTO or approved leave.
 - People who are Off or PTO stay visible, red and struck through, at the end of the time group. The count on a time chip does not include them.
 - Week columns show shift times as chips: time on the left, working headcount on the right. Support Line is a separate section at the bottom of each weekday, grouped by start time only. Saturday has no Support Line section.
-- The day view is one timeline list, grouped Leads, then VIP, then Phase 1. Do not put Phase 1 and VIP side by side unless the user asks again.
+- The day view is one timeline list, grouped Leads, then VIP, then Phase 1. Do not put Phase 1 and VIP side by side unless the user asks again. The day view has no header block (no Back button, title, subtitle or peak chips) because the top bar already shows the date and view switch. Rows are compact so the day fits with little scrolling. Only a Saturday cover note and the edit-mode Reset button appear above the timeline.
 - Year is hidden until lead access is unlocked, and it hides again when access is locked.
 - Print, Export, and Weekend Coverage sit under Access. Sync weekend stays in the header.
 - DST +1 hour shifts shift starts, breaks, splits, line assignments, and holiday hours. It also moves the Peak window (7pm–12am becomes 8pm–1am) and the Support Line window (5pm–3am becomes 6pm–4am). The board itself stays 3pm–8am PKT. Do not turn DST off unless asked.

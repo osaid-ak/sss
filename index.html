@@ -490,12 +490,13 @@
     padding: 3px 8px; font-size: 11px; color: var(--muted); font-weight: 600;
   }
   .day-stats b { color: var(--ink); }
-  .planner { flex: 1; min-height: 0; padding: 0 28px 16px 16px; overflow: auto; }
+  .planner { --rh: 36px; flex: 1; min-height: 0; padding: 0 28px 10px 16px; overflow: auto; }
+  .day-note { margin: 0 0 8px; color: var(--muted); font-size: 13px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
   .planner-inner { position: relative; min-width: 860px; }
   .planner-head {
     position: sticky; top: 0; z-index: 8;
     background: var(--paper);
-    padding-top: 16px;
+    padding-top: 8px;
     margin-bottom: 2px;
     box-shadow: 0 10px 12px -8px var(--canvas);
   }
@@ -523,17 +524,17 @@
   .band.line { background: var(--lineq-soft); color: var(--lineq); }
   .section {
     font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
-    color: var(--muted); margin: 14px 0 6px;
+    color: var(--muted); margin: 8px 0 4px;
   }
-  .row { position: relative; height: 54px; margin-bottom: 6px; }
-  .row.editing { height: 92px; margin-bottom: 10px; }
+  .row { position: relative; height: calc(var(--rh) + 6px); margin-bottom: 3px; }
+  .row.editing { --rh: 46px; height: 92px; margin-bottom: 10px; }
   .row.away { opacity: 0.45; }
   .pname {
-    position: absolute; left: 0; top: 0; width: 124px; height: 46px;
+    position: absolute; left: 0; top: 0; width: 124px; height: var(--rh);
     display: flex; align-items: center; font-size: 13px; font-weight: 600;
   }
   .track {
-    position: absolute; left: 132px; top: 0; height: 46px;
+    position: absolute; left: 132px; top: 0; height: var(--rh);
     background: var(--rail); border-radius: 8px;
   }
   .peak-band {
@@ -543,7 +544,7 @@
   .gline { position: absolute; top: 0; width: 1px; height: 100%; background: var(--line); }
   .gsoft { position: absolute; top: 0; width: 1px; height: 100%; background: var(--line-soft); }
   .shift {
-    position: absolute; top: 6px; height: 34px; border-radius: 7px;
+    position: absolute; top: calc(var(--rh) / 2 - 14px); height: 28px; border-radius: 7px;
     display: flex; align-items: center; gap: 6px; padding: 0 8px;
     color: var(--primary-ink); font-size: 11px; font-weight: 650; overflow: hidden; white-space: nowrap;
     z-index: 2;
@@ -557,17 +558,17 @@
   .qdot.can-click:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--gap) 65%, transparent); }
   .shift .res { position: absolute; right: 0; top: 0; width: 10px; height: 100%; cursor: ew-resize; }
   .split-h {
-    position: absolute; top: 4px; width: 3px; height: 38px; background: #fff;
+    position: absolute; top: calc(var(--rh) / 2 - 17px); width: 3px; height: 34px; background: #fff;
     border-radius: 2px; z-index: 4; cursor: ew-resize; box-shadow: 0 0 0 1px rgba(0,0,0,0.25);
   }
   .brk {
-    position: absolute; top: 12px; height: 22px; background: var(--brk); color: var(--ink);
+    position: absolute; top: calc(var(--rh) / 2 - 10px); height: 20px; background: var(--brk); color: var(--ink);
     border-radius: 5px; font-size: 10px; font-weight: 650; display: flex;
     align-items: center; justify-content: center; z-index: 3; overflow: hidden;
   }
   .brk.can-drag { cursor: grab; }
   .lbar {
-    position: absolute; bottom: 2px; height: 13px; background: var(--lineq); color: #fff;
+    position: absolute; bottom: 5px; height: 12px; background: var(--lineq); color: #fff;
     border-radius: 4px; font-size: 9px; font-weight: 700; display: flex;
     align-items: center; padding-left: 6px; z-index: 3; overflow: hidden;
   }
@@ -577,9 +578,9 @@
   .lbar .res.L { left: 0; }
   .lbar .res.R { right: 0; }
   .away-tag {
-    position: absolute; left: 140px; top: 12px; font-size: 12px; color: var(--muted); font-style: italic;
+    position: absolute; left: 140px; top: calc(var(--rh) / 2 - 9px); font-size: 12px; color: var(--muted); font-style: italic;
   }
-  .avail-wrap { margin-top: 14px; }
+  .avail-wrap { margin-top: 8px; }
   .avail-caption { margin-left: 132px; font-size: 11px; color: var(--faint); margin-bottom: 8px; }
   .arow { position: relative; height: 28px; margin-bottom: 5px; }
   .alab {
@@ -591,7 +592,7 @@
     display: flex; align-items: center; justify-content: center;
     font-size: 11px; font-weight: 700;
   }
-  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 14px; font-size: 12px; color: var(--muted); }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--muted); }
   .sw { width: 12px; height: 10px; border-radius: 2px; display: inline-block; margin-right: 6px; vertical-align: -1px; }
 
   .row-tools { position: absolute; left: 0; top: 50px; display: flex; gap: 4px; flex-wrap: wrap; align-items: center; max-width: 100%; }
@@ -4086,37 +4087,20 @@
     const cov = coverageFor(key);
     if (cov.closed) {
       return `<div class="day-view">
-        <div class="day-head">
-          <div>
-            <button type="button" class="ghost" id="backView">← Back to ${backViewLabel()}</button>
-            <h2>${prettyDate(ui.cursor)}</h2>
-            <p>Sunday is closed. Overnight hours from Saturday stay on Saturday and do not become a Sunday shift.</p>
-          </div>
-        </div>
-        <div class="card planner"><div class="closed-label" style="padding:28px">OFF · floor closed</div></div>
+        <div class="card planner"><div class="closed-label" style="padding:28px">OFF · floor closed. Overnight hours from Saturday stay on Saturday.</div></div>
       </div>`;
     }
     const cover = weekendCoverOf(key);
     const weekendLine = cover
-      ? `<p>Weekend cover from Actual Cover · Phase 1 ${slotLabel(weekendHours("phase1").start)}–${slotLabel(weekendHours("phase1").start + weekendHours("phase1").len)} · VIP ${slotLabel(weekendHours("vip").start)}–${slotLabel(weekendHours("vip").start + weekendHours("vip").len)} PKT${cover.status ? " · " + esc(cover.status) : ""}${cover.remarks ? " · " + esc(cover.remarks) : ""}</p>`
+      ? `Weekend cover from Actual Cover · Phase 1 ${slotLabel(weekendHours("phase1").start)}–${slotLabel(weekendHours("phase1").start + weekendHours("phase1").len)} · VIP ${slotLabel(weekendHours("vip").start)}–${slotLabel(weekendHours("vip").start + weekendHours("vip").len)} PKT${cover.status ? " · " + esc(cover.status) : ""}${cover.remarks ? " · " + esc(cover.remarks) : ""}`
       : isSaturday(key)
-        ? `<p>Saturday follows Actual Cover only. Waiting to read the Weekend Cover sheet.</p>`
-        : `<p>${nightRangeLabel(ui.cursor)} · into ${nextName}. Overnight hours stay on this date.</p>`;
+        ? "Saturday follows Actual Cover only. Waiting to read the Weekend Cover sheet."
+        : "";
+    const note = weekendLine || ui.editing
+      ? `<div class="day-note"><span>${weekendLine}</span>${ui.editing ? `<button type="button" class="ghost" id="resetDay">Reset this day to default</button>` : ""}</div>`
+      : "";
     return `<div class="day-view">
-    <div class="day-head">
-      <div>
-        <button type="button" class="ghost" id="backView">← Back to ${backViewLabel()}</button>
-        <h2>${prettyDate(ui.cursor)}</h2>
-        ${weekendLine}
-        <div class="day-stats">
-          <span>Peak Phase 1 <b>${cov.minPhase}</b></span>
-          <span>Peak VIP <b>${cov.minVip}</b></span>
-          ${cover ? "" : `<span>Line min <b>${cov.minLine}</b></span>`}
-          ${hasActiveFilter() ? "<span>Filtered view</span>" : ""}
-        </div>
-      </div>
-      ${ui.editing ? `<button type="button" class="ghost" id="resetDay">Reset this day to default</button>` : ""}
-    </div>
+    ${note}
     <div class="card planner"><div class="planner-inner" id="planner"></div></div>
     <div class="legend">
       <span><span class="sw" style="background:var(--phase)"></span>Phase 1</span>
