@@ -522,6 +522,22 @@
   }
   .band.peak { background: var(--gap-bg); color: var(--peak); }
   .band.line { background: var(--lineq-soft); color: var(--lineq); }
+  .gap-row { position: relative; height: 16px; margin: 0 0 6px 132px; }
+  .gap-label { position: absolute; left: -132px; top: 0; width: 124px; font-size: 10px; font-weight: 700; color: var(--muted); line-height: 16px; letter-spacing: 0.06em; text-transform: uppercase; }
+  .gap-label.ok { color: var(--ok); }
+  .gap-seg {
+    position: absolute; top: 0; height: 16px; border-radius: 4px; padding: 0 4px;
+    font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+    overflow: hidden; white-space: nowrap;
+  }
+  .gap-seg.red { background: color-mix(in srgb, var(--gap) 30%, transparent); color: var(--gap); }
+  .gap-seg.amber { background: color-mix(in srgb, var(--thin) 26%, transparent); color: var(--thin); }
+  .now-line { position: absolute; width: 2px; margin-left: -1px; background: var(--gap); z-index: 7; pointer-events: none; opacity: 0.9; }
+  .now-pill {
+    position: absolute; top: 24px; transform: translateX(-50%); z-index: 9; pointer-events: none;
+    background: var(--gap); color: #fff; border-radius: 999px; padding: 1px 7px;
+    font-size: 10px; font-weight: 700; white-space: nowrap;
+  }
   .section {
     font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
     color: var(--muted); margin: 8px 0 4px;
@@ -4166,6 +4182,7 @@
     head.appendChild(makeAxis(colW));
     const peakWin = peakWindow();
     head.appendChild(makeBand(colW, peakWin.start, peakWin.end, "Peak " + windowLabel(peakWin.start, peakWin.end) + " PKT", "peak"));
+    head.appendChild(makeGapRow(colW, key));
     planner.appendChild(head);
 
     const groups = [];
@@ -4224,9 +4241,96 @@
     });
     planner.appendChild(wrap);
     planner.dataset.colw = colW;
+    updateNowLine();
+    const nowAt = pktNowSlot();
+    if (nowAt && nowAt.key === key && ui.nowScrolled !== key) {
+      const box = planner.parentElement;
+      if (box && box.scrollWidth > box.clientWidth) {
+        ui.nowScrolled = key;
+        box.scrollLeft = Math.max(0, LABEL_W + nowAt.slot * colW - box.clientWidth * 0.4);
+      }
+    }
     if (ui.editing) attachDrag(planner, key, colW);
   }
+  setInterval(() => {
+    if (document.visibilityState === "visible" && ui.view === "day" && !ui.editing) updateNowLine();
+  }, 30000);
 
+  function pktNowSlot() {
+    const t = new Date(Date.now() + 5 * 3600 * 1000);
+    const mins = t.getUTCHours() * 60 + t.getUTCMinutes() + t.getUTCSeconds() / 60;
+    let night = new Date(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate());
+    let since;
+    if (mins >= START_MIN) since = mins - START_MIN;
+    else if (mins < END_MIN - 24 * 60) { night = addDays(night, -1); since = mins + 24 * 60 - START_MIN; }
+    else return null;
+    const hr = t.getUTCHours(), mn = t.getUTCMinutes();
+    const label = (hr % 12 || 12) + ":" + pad(mn) + (hr < 12 ? "am" : "pm");
+    return { key: dateKey(night), slot: since / SLOT_MIN, label };
+  }
+  function updateNowLine() {
+    const planner = document.getElementById("planner");
+    if (!planner || ui.view !== "day") return;
+    planner.querySelectorAll(".now-line, .now-pill").forEach(el => el.remove());
+    const now = pktNowSlot();
+    const colW = Number(planner.dataset.colw);
+    const head = planner.querySelector(".planner-head");
+    const axis = planner.querySelector(".axis");
+    if (!now || !colW || !head || !axis || now.key !== dateKey(ui.cursor)) return;
+    const x = now.slot * colW;
+    const line = document.createElement("div");
+    line.className = "now-line";
+    line.style.left = (LABEL_W + x) + "px";
+    line.style.top = head.offsetHeight + "px";
+    line.style.height = Math.max(0, planner.offsetHeight - head.offsetHeight) + "px";
+    planner.appendChild(line);
+    const pill = document.createElement("div");
+    pill.className = "now-pill";
+    pill.style.left = x + "px";
+    pill.textContent = "Now " + now.label;
+    axis.appendChild(pill);
+  }
+  function makeGapRow(colW, key) {
+    const row = document.createElement("div");
+    row.className = "gap-row";
+    const lab = document.createElement("div");
+    lab.className = "gap-label";
+    row.appendChild(lab);
+    const cov = coverageFor(key);
+    if (cov.weekend || cov.closed) { row.style.display = "none"; return row; }
+    const peak = peakWindow();
+    const lineWin = lineWindow();
+    const marks = [];
+    for (let s = 0; s < SLOTS; s++) {
+      const bits = [];
+      let worst = 2;
+      const check = (name, v) => {
+        if (v <= 1) { bits.push(name + " " + v); worst = Math.min(worst, v); }
+      };
+      if (s >= peak.start && s < peak.end) { check("Phase 1", cov.phase[s]); check("VIP", cov.vip[s]); }
+      if (s >= lineWin.start && s < lineWin.end) check("Line", cov.line[s]);
+      marks.push(bits.length ? { text: bits.join(" · "), tone: worst === 0 ? "red" : "amber" } : null);
+    }
+    let any = false;
+    for (let s = 0; s < SLOTS;) {
+      const m = marks[s];
+      if (!m) { s++; continue; }
+      let e = s + 1;
+      while (e < SLOTS && marks[e] && marks[e].text === m.text && marks[e].tone === m.tone) e++;
+      const seg = document.createElement("div");
+      seg.className = "gap-seg " + m.tone;
+      seg.style.left = (s * colW) + "px";
+      seg.style.width = ((e - s) * colW) + "px";
+      seg.textContent = m.text;
+      seg.title = slotLabel(s) + "–" + slotLabel(e) + " PKT: " + m.text + (m.tone === "red" ? " (nobody)" : " (one person)");
+      row.appendChild(seg);
+      any = true;
+      s = e;
+    }
+    lab.textContent = any ? "Gaps" : "Cover ok";
+    if (!any) lab.classList.add("ok");
+    return row;
+  }
   function makeAxis(colW) {
     const wrap = document.createElement("div");
     wrap.className = "axis-wrap";
