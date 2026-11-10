@@ -527,6 +527,14 @@
   }
   .band.peak { background: var(--gap-bg); color: var(--peak); }
   .band.line { background: var(--lineq-soft); color: var(--lineq); }
+  .late-alert {
+    margin: 0 0 8px; padding: 8px 12px; border-radius: 10px; font-size: 13px;
+    border: 1px solid var(--gap); background: color-mix(in srgb, var(--gap) 12%, transparent);
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .late-alert .late-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+  .late-alert select { max-width: 260px; font-size: 12px; padding: 3px 22px 3px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
+  .late-ok { color: var(--muted); font-size: 12px; }
   .gap-row { position: relative; height: 16px; margin: 0 0 6px 132px; }
   .gap-label { position: absolute; left: -132px; top: 0; width: 124px; font-size: 10px; font-weight: 700; color: var(--muted); line-height: 16px; letter-spacing: 0.06em; text-transform: uppercase; }
   .gap-label.ok { color: var(--ok); }
@@ -1154,6 +1162,7 @@
       leaves: [],
       holidays: [],
       vipPlan: { blocks: [] },
+      lateCover: {},
       days: {},
       dst: false
     };
@@ -1345,6 +1354,20 @@
       });
     });
   }
+  // A lead can name a replacement for a night's late shift: one VIP and one Phase 1 person.
+  function sanitizeLateCover(raw) {
+    const out = {};
+    if (!raw || typeof raw !== "object") return out;
+    Object.keys(raw).forEach(key => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return;
+      const v = raw[key] || {};
+      const entry = {};
+      if (v.vip && String(v.vip).trim()) entry.vip = String(v.vip).trim();
+      if (v.phase1 && String(v.phase1).trim()) entry.phase1 = String(v.phase1).trim();
+      if (entry.vip || entry.phase1) out[key] = entry;
+    });
+    return out;
+  }
   function sanitizeVipPlan(raw) {
     const src = raw && Array.isArray(raw.blocks) ? raw.blocks : [];
     const key = /^\d{4}-\d{2}-\d{2}$/;
@@ -1416,6 +1439,7 @@
       if (isSaturday(k) && !(d.days[k] && d.days[k].weekendCover)) delete d.days[k];
     });
     d.vipPlan = sanitizeVipPlan(raw.vipPlan);
+    d.lateCover = sanitizeLateCover(raw.lateCover);
     d.updatedAt = typeof raw.updatedAt === "string" ? raw.updatedAt : "";
     d.dst = false;
     return d;
@@ -1609,6 +1633,7 @@
       holidays: mergeRecords(base && base.holidays, remote && remote.holidays, local && local.holidays, remoteAt, localAt, item => item && item.id),
       days: mergeDays(base && base.days, remote && remote.days, local && local.days, remoteAt, localAt),
       vipPlan: pickField(base && base.vipPlan, remote && remote.vipPlan, local && local.vipPlan, remoteAt, localAt),
+      lateCover: mergeDays(base && base.lateCover, remote && remote.lateCover, local && local.lateCover, remoteAt, localAt),
       dst: false,
       slotOrigin: START_MIN
     };
@@ -3726,6 +3751,38 @@
       }
     });
   }
+  function lateStartFor(key) { return VIP_LATE_START + dstSlots(key); }
+  function lateCoverFor(key) { return (data.lateCover && data.lateCover[key]) || null; }
+  function applyLateCover(people, key) {
+    const cov = lateCoverFor(key);
+    if (!cov) return;
+    const start = lateStartFor(key);
+    [["vip", cov.vip], ["phase1", cov.phase1]].forEach(([kind, name]) => {
+      const p = name && people.find(x => x.name === name);
+      if (!p) return;
+      const rel = Number.isFinite(p.brk) && Number.isFinite(p.start) ? p.brk - p.start : Math.floor(VIP_LATE_LEN / 2) - 1;
+      p.split = null;
+      applyHoursToPerson(p, start, VIP_LATE_LEN, clamp(start + rel, start, start + VIP_LATE_LEN - 2));
+      p.roles = Object.assign({}, rolesOf(p), kind === "vip" ? { vip: true, phase1: false } : { phase1: true, vip: false });
+      syncPersonDerived(p);
+    });
+  }
+  // Every weekday late shift needs one VIP and one Phase 1 person who is actually working.
+  function lateStatus(people, away, key) {
+    const start = lateStartFor(key);
+    const vip = [], phase1 = [], absent = [];
+    (people || []).forEach(p => {
+      if (!Number.isFinite(p.start) || p.start < start) return;
+      if (away && away.has(p.name)) { absent.push(p.name); return; }
+      const r = rolesOf(p);
+      if (r.vip) vip.push(p.name);
+      if (r.phase1) phase1.push(p.name);
+    });
+    const missing = [];
+    if (!vip.length) missing.push("vip");
+    if (!phase1.length) missing.push("phase1");
+    return { start, vip, phase1, absent, missing };
+  }
   function resolveDay(key, previewPlan) {
     if (isClosedDay(key)) {
       return { people: [], lineBars: [], away: new Set(), closed: true, weekend: false };
@@ -3773,6 +3830,7 @@
       }
       applyVipBlock(people, key);
     }
+    applyLateCover(people, key);
     if (previewPlan && previewPlan.hours && previewPlan.hours[key]) {
       Object.keys(previewPlan.hours[key]).forEach(name => {
         const h = previewPlan.hours[key][name];
@@ -3870,7 +3928,9 @@
     const peakPhase = phase.slice(peakWin.start, peakWin.end);
     const peakVip = vip.slice(peakWin.start, peakWin.end);
     const lineSpan = line.slice(lineWin.start, lineWin.end);
+    const late = lateStatus(people, away, key);
     return {
+      lateMissing: late.missing,
       phase, vip, line, weekend: false, closed: false,
       minPhase: minOf(peakPhase),
       minVip: minOf(peakVip),
@@ -3878,7 +3938,7 @@
       onPhase: heads.onPhase,
       onVip: heads.onVip,
       onLine: heads.onLine,
-      gap: peakPhase.some(v => v === 0) || peakVip.some(v => v === 0) || lineSpan.some(v => v === 0),
+      gap: peakPhase.some(v => v === 0) || peakVip.some(v => v === 0) || lineSpan.some(v => v === 0) || late.missing.length > 0,
       thin: peakPhase.some(v => v === 1) || peakVip.some(v => v === 1) || lineSpan.some(v => v === 1)
     };
   }
@@ -4346,6 +4406,43 @@
     return html + "</div>";
   }
 
+  function lateAlertHtml(key) {
+    if (isClosedDay(key) || isSaturday(key)) return "";
+    const day = resolveDay(key);
+    const st = lateStatus(day.people, day.away, key);
+    const cover = lateCoverFor(key) || {};
+    const range = slotLabel(st.start) + "–" + slotLabel(st.start + VIP_LATE_LEN);
+    const kindName = { vip: "VIP", phase1: "Phase 1" };
+    const lines = [];
+    st.missing.forEach(kind => {
+      const who = st.absent.length ? " " + st.absent.map(esc).join(", ") + (st.absent.length === 1 ? " is" : " are") + " off." : "";
+      let control;
+      if (ui.leadAccess) {
+        const taken = new Set([cover.vip, cover.phase1].filter(Boolean));
+        const options = day.people
+          .filter(p => !day.away.has(p.name) && p.start < st.start && !taken.has(p.name))
+          .sort((a, b) => {
+            const same = x => (kind === "vip" ? rolesOf(x).vip : rolesOf(x).phase1) ? 0 : 1;
+            return same(a) - same(b) || a.name.localeCompare(b.name);
+          })
+          .map(p => `<option value="${esc(p.name)}">${esc(p.name)} · ${slotLabel(p.start)}–${slotLabel(p.start + p.len)}</option>`).join("");
+        control = `<select data-late-pick="${kind}" aria-label="Add ${kindName[kind]} cover"><option value="">Choose cover</option>${options}</select>` +
+          `<button type="button" class="primary" data-late-add="${kind}">Add cover</button>`;
+      } else {
+        control = `<span class="late-ok">A lead can add cover from Access.</span>`;
+      }
+      lines.push(`<div class="late-line"><strong>Late shift ${range} needs a ${kindName[kind]} person.</strong>${who} ${control}</div>`);
+    });
+    if (ui.leadAccess) {
+      ["vip", "phase1"].forEach(kind => {
+        if (!cover[kind]) return;
+        lines.push(`<div class="late-line"><span class="late-ok">Late cover for ${kindName[kind]}: <b>${esc(cover[kind])}</b></span>` +
+          `<button type="button" class="ghost" data-late-remove="${kind}">Remove</button></div>`);
+      });
+    }
+    if (!lines.length) return "";
+    return `<div class="late-alert" id="lateAlert">${lines.join("")}</div>`;
+  }
   function renderDay() {
     const key = dateKey(ui.cursor);
     const next = addDays(ui.cursor, 1);
@@ -4367,6 +4464,7 @@
       : "";
     return `<div class="day-view">
     ${note}
+    ${lateAlertHtml(key)}
     <div class="card planner"><div class="planner-inner" id="planner"></div></div>
     <div class="legend">
       <span><span class="sw" style="background:var(--phase)"></span>Phase 1</span>
@@ -4400,6 +4498,28 @@
         const [y, m] = el.dataset.gotoMonth.split("-").map(Number);
         ui.cursor = new Date(y, m, 1);
         setView("month");
+      });
+    });
+    document.querySelectorAll("[data-late-add]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const kind = btn.dataset.lateAdd;
+        const sel = document.querySelector('[data-late-pick="' + kind + '"]');
+        if (!sel || !sel.value) return;
+        const key = dateKey(ui.cursor);
+        data.lateCover = data.lateCover || {};
+        data.lateCover[key] = Object.assign({}, data.lateCover[key] || {}, { [kind]: sel.value });
+        persist();
+        render();
+      });
+    });
+    document.querySelectorAll("[data-late-remove]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const key = dateKey(ui.cursor);
+        if (!data.lateCover || !data.lateCover[key]) return;
+        delete data.lateCover[key][btn.dataset.lateRemove];
+        if (!data.lateCover[key].vip && !data.lateCover[key].phase1) delete data.lateCover[key];
+        persist();
+        render();
       });
     });
     const reset = document.getElementById("resetDay");

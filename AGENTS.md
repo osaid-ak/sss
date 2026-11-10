@@ -33,6 +33,8 @@ Always read the Actual Cover columns on the sheet, not Planned. Actual updates i
 
 The `2. VIP Coverage Plan` tab (gid 1563923804, same workbook) lists two-week Monday to Friday blocks. Each block names one VIP person on Late Shift and one on Phase 1, read from Actual Cover. The page polls it with the weekend sheet and stores the blocks in the shared plan as `vipPlan`. On weekdays inside a block, the Late Shift person works 9:30pm–6:30am PKT (10:30pm–7:30am on standard-time dates), keeping their usual break offset, and the Phase 1 person moves from VIP to Phase 1 for the whole shift. Days someone edited by hand keep their own edit. Saturdays and Sundays are not affected. A failed read keeps the last blocks.
 
+Every weekday late shift (anyone starting at 9:30pm PKT, or 10:30pm on standard-time dates, or later) needs one working VIP person and one working Phase 1 person. People who are Off or PTO do not count. When one is missing, the day view shows a red alert above the timeline naming who is off, and the month and week cells for that day show the red gap tint. With lead access the alert has a dropdown and Add cover button. The chosen person takes the late hours and the queue that is missing for that night, and a lead can Remove it. Covers are stored per date in the shared plan as `lateCover` and merge per date. Without lead access the alert says a lead can add cover from Access.
+
 ## Standing rules
 
 - Primary time is PKT. ET is the secondary label. Overnight hours stay on the start day. Sunday is closed.
