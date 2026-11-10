@@ -4509,7 +4509,10 @@
       bar.style.left = (LABEL_W + b.start * colW) + "px";
       bar.style.width = (b.len * colW) + "px";
       bar.textContent = "Line " + slotLabel(b.start) + "–" + slotLabel(b.start + b.len);
-      if (b.start < p.start || b.start + b.len > p.start + p.len) bar.style.boxShadow = "0 0 0 2px var(--gap)";
+      if (b.start < p.start || b.start + b.len > p.start + p.len) {
+        bar.style.boxShadow = "0 0 0 2px var(--gap)";
+        bar.title = p.name + "'s Support Line duty runs outside their shift (" + slotLabel(p.start) + "–" + slotLabel(p.start + p.len) + "). That time is not counted as line cover.";
+      }
       if (ui.editing) {
         const L = document.createElement("div"); L.className = "res L"; L.dataset.type = "line"; L.dataset.hidx = bi; L.dataset.edge = "L";
         const R = document.createElement("div"); R.className = "res R"; R.dataset.type = "line"; R.dataset.hidx = bi; R.dataset.edge = "R";
