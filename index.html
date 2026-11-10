@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
-<title>Support Shift Schedule (SSS)</title>
+<title>Shift Plan</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
@@ -751,10 +751,24 @@
   .badge { background: var(--gap); color: #fff; border-radius: 999px; font-size: 10px; padding: 1px 6px; margin-left: 4px; }
   .hidden { display: none !important; }
   .pin-err { color: var(--gap); font-size: 13px; font-weight: 600; margin: 8px 0 0; }
+  button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--phase); outline-offset: 2px;
+  }
+  .nav button, .ghost, .primary, .views button { white-space: nowrap; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+  }
+  .dnum-dow { display: none; }
   @media (max-width: 900px) {
+    .month-dow { display: none; }
+    .dnum-dow { display: inline; margin-left: 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
     .month-grid, .week-grid,
     .month-grid.hide-closed, .week-grid.hide-closed { grid-template-columns: 1fr; }
-    .nav-title { min-width: 0; }
+    .nav-title { min-width: 0; flex: 1 1 auto; }
+    .nav-title strong { font-size: 17px; white-space: nowrap; }
+    .nav { flex-wrap: wrap; }
+    .nav button, .ghost, .primary { min-height: 36px; padding: 6px 12px; }
+    .views button { min-height: 32px; padding: 6px 12px; }
   }
   @media print {
     html, body, .app { height: auto; overflow: visible; }
@@ -3939,7 +3953,7 @@
       const hit = dayShowsUnderFilter(key);
       const dim = hasActiveFilter() && !hit;
       html += `<button type="button" class="daycell ${out ? "out" : ""} ${sameDay(d, today) ? "today" : ""} ${isPastNight(d, today) ? "past" : ""} ${!dim && cov.weekend ? "weekend" : ""} ${dim ? "dim" : toneClass(cov)}" data-open-day="${key}">
-        <div class="dnum">${d.getDate()}</div>
+        <div class="dnum">${d.getDate()}<span class="dnum-dow">${d.toLocaleDateString(undefined, { weekday: "short" })}</span></div>
         ${dim ? "" : chipsHtml(cov)}
         ${dim ? "" : cellNamesHtml(key)}
       </button>`;

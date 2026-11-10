@@ -14,10 +14,9 @@ A true custom hostname such as `sss.yourteam.com` is free on GitHub Pages, but y
 
 **Weekend Coverage** opens the Google Sheet for anyone who already has access.
 
-The calendar also reads Saturday Actual Cover from that sheet on load, when you come back to the tab, and about every 45 seconds. For that live read to work from the public page, use one of these:
+The calendar also reads Saturday Actual Cover from that sheet on load, when you come back to the tab, and about every 45 seconds. This works today because the Weekend Cover tab is shared as **Anyone with the link can view** (edit access stays limited to the team). If that sharing is ever turned off, the live read stops and Saturdays keep their last synced names. The fallback is:
 
-1. Share the Weekend Cover tab as **Anyone with the link can view** (edit access can stay limited to the team), or
-2. Deploy `weekend-cover.gs` from the sheet: Extensions → Apps Script → paste → Deploy → Web app → Execute as Me, Who has access: Anyone. Put the `/exec` URL in `WEEKEND_COVER_API` in the calendar file.
+- Deploy `weekend-cover.gs` from the sheet: Extensions → Apps Script → paste → Deploy → Web app → Execute as Me, Who has access: Anyone. Put the `/exec` URL in `WEEKEND_COVER_API` in the calendar file.
 
 ## What testers should know
 
