@@ -82,12 +82,11 @@ function parseWeekendRows(rows) {
     const swapP1 = cell(row, swapAt);
     const swapVip = [cell(row, swapAt + 1), cell(row, swapAt + 2)];
     const swapped = !!(swapP1 || swapVip[0] || swapVip[1]);
-    let phase1 = swapP1 || plannedP1;
-    let vip = vipNames(swapVip[0] || plannedVip[0], swapVip[1] || plannedVip[1]);
-    if (!phase1 && !vip.length) {
-      phase1 = cell(row, actualAt);
-      vip = vipNames(cell(row, actualAt + 1), cell(row, actualAt + 2));
-    }
+    // Actual Cover is the live column. Swap, then Planned, only fill in when Actual is blank.
+    let phase1 = cell(row, actualAt);
+    let vip = vipNames(cell(row, actualAt + 1), cell(row, actualAt + 2));
+    if (!phase1) phase1 = swapP1 || plannedP1;
+    if (!vip.length) vip = vipNames(swapVip[0] || plannedVip[0], swapVip[1] || plannedVip[1]);
     if (!phase1 && !vip.length) continue;
     let status = cell(row, statusAt);
     if (!swapped) status = "✓ Planned";

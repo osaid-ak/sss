@@ -815,7 +815,7 @@
       </div>
       <div class="actions">
         <span class="editing-flag hidden" id="editFlag">Editing</span>
-        <button type="button" class="ghost" id="syncWeekendBtn">Sync weekend</button>
+        <button type="button" class="ghost" id="syncWeekendBtn">Sync sheet</button>
         <div class="pop-wrap">
           <button type="button" class="ghost" id="themeBtn">Theme</button>
           <div class="pop hidden" id="themeMenu">
@@ -866,6 +866,10 @@
   const WEEKEND_SHEET_GID = 1806071421;
   const WEEKEND_COVER_API = "";
   const WEEKEND_POLL_MS = 45000;
+  const VIP_SHEET_GID = 1563923804;
+  // Late shift is 9:30pm–6:30am PKT on the summer schedule (10:30pm–7:30am in standard time).
+  const VIP_LATE_START = 13;
+  const VIP_LATE_LEN = 18;
   const THEMES = [
     { id: "night", name: "Night", swatch: "#2ee6c5" },
     { id: "frost", name: "Frost", swatch: "#1d5aa6" }
@@ -1121,6 +1125,7 @@
       lineBars: clone(DEFAULT_LINE),
       leaves: [],
       holidays: [],
+      vipPlan: { blocks: [] },
       days: {},
       dst: false
     };
@@ -1312,6 +1317,18 @@
       });
     });
   }
+  function sanitizeVipPlan(raw) {
+    const src = raw && Array.isArray(raw.blocks) ? raw.blocks : [];
+    const key = /^\d{4}-\d{2}-\d{2}$/;
+    const blocks = src.map(b => ({
+      start: String((b && b.start) || ""),
+      end: String((b && b.end) || ""),
+      late: String((b && b.late) || "").trim(),
+      phase1: String((b && b.phase1) || "").trim()
+    })).filter(b => key.test(b.start) && key.test(b.end) && b.end >= b.start && (b.late || b.phase1));
+    blocks.sort((a, b) => a.start.localeCompare(b.start));
+    return { blocks };
+  }
   function sanitizeData(raw) {
     const d = defaultData();
     if (!raw || typeof raw !== "object") return d;
@@ -1370,6 +1387,7 @@
     Object.keys(d.days).forEach(k => {
       if (isSaturday(k) && !(d.days[k] && d.days[k].weekendCover)) delete d.days[k];
     });
+    d.vipPlan = sanitizeVipPlan(raw.vipPlan);
     d.updatedAt = typeof raw.updatedAt === "string" ? raw.updatedAt : "";
     d.dst = false;
     return d;
@@ -1561,6 +1579,7 @@
       leaves: mergeRecords(base && base.leaves, remote && remote.leaves, local && local.leaves, remoteAt, localAt, item => item && item.id),
       holidays: mergeRecords(base && base.holidays, remote && remote.holidays, local && local.holidays, remoteAt, localAt, item => item && item.id),
       days: mergeDays(base && base.days, remote && remote.days, local && local.days, remoteAt, localAt),
+      vipPlan: pickField(base && base.vipPlan, remote && remote.vipPlan, local && local.vipPlan, remoteAt, localAt),
       dst: false,
       slotOrigin: START_MIN
     };
@@ -1911,12 +1930,11 @@
       const swapP1 = weekendCell(row, cols.swapAt);
       const swapVip = [weekendCell(row, cols.swapAt + 1), weekendCell(row, cols.swapAt + 2)];
       const swapped = !!(swapP1 || swapVip[0] || swapVip[1]);
-      let phase1 = swapP1 || plannedP1;
-      let vip = weekendVipNames(swapVip[0] || plannedVip[0], swapVip[1] || plannedVip[1]);
-      if (!phase1 && !vip.length) {
-        phase1 = weekendCell(row, cols.actualAt);
-        vip = weekendVipNames(weekendCell(row, cols.actualAt + 1), weekendCell(row, cols.actualAt + 2));
-      }
+      // Actual Cover is the live column, so it wins. Swap, then Planned, only fill in when Actual is blank.
+      let phase1 = weekendCell(row, cols.actualAt);
+      let vip = weekendVipNames(weekendCell(row, cols.actualAt + 1), weekendCell(row, cols.actualAt + 2));
+      if (!phase1) phase1 = swapP1 || plannedP1;
+      if (!vip.length) vip = weekendVipNames(swapVip[0] || plannedVip[0], swapVip[1] || plannedVip[1]);
       if (!phase1 && !vip.length) continue;
       let status = weekendCell(row, cols.statusAt);
       if (!swapped) status = "✓ Planned";
@@ -2078,14 +2096,109 @@
       .finally(() => { weekendSync.busy = false; });
   }
   function startWeekendAutoSync() {
-    pullWeekendCover(false);
+    const pullAll = () => { pullWeekendCover(false); pullVipPlan(); };
+    pullAll();
     if (weekendSync.timer) clearInterval(weekendSync.timer);
     weekendSync.timer = setInterval(() => {
-      if (document.visibilityState === "visible") pullWeekendCover(false);
+      if (document.visibilityState === "visible") pullAll();
     }, WEEKEND_POLL_MS);
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") pullWeekendCover(false);
+      if (document.visibilityState === "visible") pullAll();
     });
+  }
+
+  const vipSync = { busy: false, last: "", error: "" };
+  function vipParseDate(raw) {
+    const t = String(raw || "").replace(/\s+/g, " ").trim();
+    const a = weekendParseDate(t);
+    if (a) return a;
+    const m = t.match(/([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})$/);
+    if (!m) return null;
+    const months = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+    const month = months[m[1].slice(0, 3).toLowerCase()];
+    if (!month) return null;
+    return m[3] + "-" + String(month).padStart(2, "0") + "-" + String(Number(m[2])).padStart(2, "0");
+  }
+  function parseVipPlanRows(rows) {
+    const label = v => weekendHeaderLabel(v);
+    const headerIndex = rows.findIndex(row => row.some(c => label(c) === "ACTUAL COVER"));
+    if (headerIndex < 0) throw new Error("Could not find the Actual Cover header on the VIP Coverage Plan tab.");
+    const header = rows[headerIndex];
+    const subRow = rows[headerIndex + 1] || [];
+    const at = name => header.findIndex(c => label(c) === name);
+    const plannedAt = at("PLANNED COVER");
+    const swapAt = header.findIndex(c => label(c).indexOf("SWAP") === 0);
+    const actualAt = at("ACTUAL COVER");
+    // Each group is two columns: Late Shift and Phase 1. Read the labels under the group header so the order can change.
+    const pair = c => {
+      if (c < 0) return null;
+      const first = label(subRow[c]), second = label(subRow[c + 1]);
+      if (second.indexOf("LATE") === 0 && first.indexOf("PHASE") === 0) return { late: c + 1, phase1: c };
+      return { late: c, phase1: c + 1 };
+    };
+    const planned = pair(plannedAt), swap = pair(swapAt), actual = pair(actualAt);
+    const blocks = [];
+    for (let i = headerIndex + 2; i < rows.length; i++) {
+      const row = rows[i];
+      const dates = row.slice(0, 4).map(vipParseDate).filter(Boolean);
+      if (dates.length < 2) continue;
+      const name = (cols, field) => cols ? weekendCell(row, cols[field]) : "";
+      // Actual Cover is the live column. Swap, then Planned, only fill in when Actual is blank.
+      const late = name(actual, "late") || name(swap, "late") || name(planned, "late");
+      const phase1 = name(actual, "phase1") || name(swap, "phase1") || name(planned, "phase1");
+      if (!late && !phase1) continue;
+      blocks.push({ start: dates[0], end: dates[1], late, phase1 });
+    }
+    return blocks;
+  }
+  function fetchGvizRows(gid) {
+    return new Promise((resolve, reject) => {
+      const name = "sssVip_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7);
+      let script;
+      const timer = setTimeout(() => finish(new Error("VIP Coverage Plan timed out.")), 15000);
+      function finish(err, rows) {
+        clearTimeout(timer);
+        try { delete window[name]; } catch (_) { window[name] = undefined; }
+        if (script && script.parentNode) script.parentNode.removeChild(script);
+        if (err) reject(err); else resolve(rows);
+      }
+      window[name] = function (json) {
+        try {
+          if (!json || json.status === "error") { finish(new Error("VIP Coverage Plan tab is not readable from the live page.")); return; }
+          finish(null, parseGvizRows(json.table || {}));
+        } catch (err) { finish(err); }
+      };
+      script = document.createElement("script");
+      script.async = true;
+      script.src = "https://docs.google.com/spreadsheets/d/" + WEEKEND_SHEET_ID + "/gviz/tq?gid=" + gid +
+        "&headers=0&tqx=" + encodeURIComponent("out:json;responseHandler:" + name) + "&_=" + Date.now();
+      script.onerror = function () { finish(new Error("VIP Coverage Plan request failed.")); };
+      document.head.appendChild(script);
+    });
+  }
+  function pullVipPlan() {
+    if (vipSync.busy) return Promise.resolve(0);
+    vipSync.busy = true;
+    return fetchGvizRows(VIP_SHEET_GID)
+      .then(rows => {
+        const blocks = parseVipPlanRows(rows).map(b => ({
+          start: b.start, end: b.end, late: matchRosterName(b.late), phase1: matchRosterName(b.phase1)
+        }));
+        const next = sanitizeVipPlan({ blocks });
+        if (!next.blocks.length) throw new Error("No coverage blocks were found on the VIP Coverage Plan tab.");
+        vipSync.last = new Date().toISOString();
+        vipSync.error = "";
+        if (sameJson(next, sanitizeVipPlan(data.vipPlan))) return 0;
+        data.vipPlan = next;
+        persist();
+        render();
+        return 1;
+      })
+      .catch(err => {
+        vipSync.error = err && err.message ? err.message : "Could not sync the VIP Coverage Plan.";
+        return 0;
+      })
+      .finally(() => { vipSync.busy = false; });
   }
 
   function approvedLeaves() {
@@ -3505,6 +3618,29 @@
     w.print();
   }
 
+  function vipBlockFor(key) {
+    const blocks = (data.vipPlan && data.vipPlan.blocks) || [];
+    return blocks.find(b => b.start <= key && key <= b.end) || null;
+  }
+  // The VIP Coverage Plan sheet names one late-shift person and one Phase 1 person for each two-week block.
+  function applyVipBlock(people, key) {
+    const blk = vipBlockFor(key);
+    if (!blk) return;
+    const off = dstSlots(key);
+    people.forEach(p => {
+      if (blk.late && p.name === blk.late) {
+        const rel = Number.isFinite(p.brk) && Number.isFinite(p.start) ? p.brk - p.start : Math.floor(VIP_LATE_LEN / 2) - 1;
+        const start = VIP_LATE_START + off;
+        p.split = null;
+        applyHoursToPerson(p, start, VIP_LATE_LEN, clamp(start + rel, start, start + VIP_LATE_LEN - 2));
+      }
+      if (blk.phase1 && p.name === blk.phase1) {
+        p.roles = Object.assign({}, rolesOf(p), { phase1: true, vip: false });
+        p.split = null;
+        syncPersonDerived(p);
+      }
+    });
+  }
   function resolveDay(key, previewPlan) {
     if (isClosedDay(key)) {
       return { people: [], lineBars: [], away: new Set(), closed: true, weekend: false };
@@ -3550,6 +3686,7 @@
         people.forEach(p => shiftPersonClock(p, off));
         lineBars.forEach(b => shiftBarClock(b, off));
       }
+      applyVipBlock(people, key);
     }
     if (previewPlan && previewPlan.hours && previewPlan.hours[key]) {
       Object.keys(previewPlan.hours[key]).forEach(name => {
@@ -4228,6 +4365,8 @@
       return;
     }
 
+    const groupRank = t => { const i = ["Leads", "VIP", "Phase 1"].indexOf(t); return i < 0 ? 9 : i; };
+    groups.sort((a, b) => groupRank(a.title) - groupRank(b.title));
     groups.forEach(g => {
       const h = document.createElement("div");
       h.className = "section";
@@ -6134,11 +6273,17 @@
     renderChrome();
   });
   document.getElementById("syncWeekendBtn").addEventListener("click", () => {
-    pullWeekendCover(true).then(changed => {
-      if (weekendSync.error && !weekendSync.last) return;
-      alert(changed
-        ? "Updated " + changed + " Saturday" + (changed === 1 ? "" : "s") + " from Actual Cover."
-        : "Saturday cover already matches Actual Cover.");
+    Promise.all([pullWeekendCover(true), pullVipPlan()]).then(([changed, vipChanged]) => {
+      const lines = [];
+      if (!(weekendSync.error && !weekendSync.last)) {
+        lines.push(changed
+          ? "Updated " + changed + " Saturday" + (changed === 1 ? "" : "s") + " from Actual Cover."
+          : "Saturday cover already matches Actual Cover.");
+      }
+      lines.push(vipSync.error
+        ? "VIP Coverage Plan: " + vipSync.error
+        : vipChanged ? "Updated the VIP late shift and Phase 1 blocks from Actual Cover." : "VIP late shift and Phase 1 blocks already match Actual Cover.");
+      alert(lines.join("\n"));
     });
   });
   document.getElementById("exportBtn").addEventListener("click", () => {
