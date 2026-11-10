@@ -25,6 +25,8 @@ Do not commit `coverage-calendar.html`, `serve-calendar.py`, or secrets. On Powe
 
 Edits sync through the shared plan named `TEAM_PLAN` in the calendar file. A browser also keeps a local copy. Do not describe the calendar as Export/Import only.
 
+Safety rule: a browser that has no plan of its own must adopt the team plan exactly on first contact, and data read from the Google Sheet (weekend names, VIP blocks) is saved quietly without counting as a team edit. Never let anything bump `updatedAt` or push before the first team sync finishes, because built-in default names and hours would then overwrite the team's roster. When testing, never load the live page from a fresh browser such as the preview pane. Use a copy pointed at a local stand-in for the team plan.
+
 Each browser keeps up to 5 automatic backups (local storage key `coverage-calendar-backups`), taken before a teammate or merged update (at most every 15 minutes) and before a JSON import or restore. Lead tools has Restore backup. Import asks for confirmation because it replaces the shared plan. Browser panes that block storage skip backups silently.
 
 Always read the Actual Cover columns on the sheet, not Planned. Actual updates itself when a swap happens. Swap, then Planned, only fill in when Actual is blank. Saturday names come from the Weekend Cover sheet. The sheet has no time columns. The product windows are Phase 1 8pm–2am and VIP 5pm–2am. Display re-applies those windows, then adds one hour on standard-time dates. Do not make that spreadsheet world-editable. Do not rewrite stored clocks unless the user asks.

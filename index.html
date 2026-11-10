@@ -1427,6 +1427,7 @@
 
   let snapshotUi = null;
   let hadLocalPlan = false;
+  let teamFirstDone = false;
   let openedFromSnapshot = false;
   function load() {
     const embedded = loadEmbedded();
@@ -1700,6 +1701,16 @@
       return;
     }
     const remoteAt = String(remoteDoc.updatedAt);
+    if (!teamFirstDone && !hadLocalPlan && !data.updatedAt && !readSyncBase()) {
+      // Nothing of ours to merge. The built-in defaults must never beat the team's saved plan.
+      const first = preparedCalendar(remoteDoc.calendar);
+      if (first) {
+        applyTeamDoc({ updatedAt: remoteAt, calendar: first });
+        setTeamStatus("Live with the team", "ok");
+        setTimeout(() => { pullWeekendCover(false); pullVipPlan(); }, 1500);
+        return;
+      }
+    }
     const remoteCal = preparedCalendar(remoteDoc.calendar);
     const baseWrap = readSyncBase();
     const baseCal = baseWrap && baseWrap.calendar ? preparedCalendar(baseWrap.calendar) : null;
@@ -1748,6 +1759,7 @@
       do {
         teamQueued = false;
         await reconcile(await readTeam());
+        teamFirstDone = true;
       } while (teamQueued && !screenBusy());
       teamPollMs = 20000;
     } catch (error) {
@@ -1768,6 +1780,13 @@
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") syncTeam();
     });
+  }
+  // Data read from the Google Sheet is derived, and every browser reads it for itself.
+  // Saving it must never count as a team edit, or a browser that has not heard from the team yet
+  // would look newer than the team plan and overwrite it.
+  function persistQuiet() {
+    if (openedFromSnapshot) return;
+    writeLocalPlan();
   }
   function persist() {
     data.pin = LEAD_PIN;
@@ -1894,7 +1913,7 @@
       writeWeekendDay(key, next);
       changed += 1;
     });
-    if (changed) persist();
+    if (changed) persistQuiet();
     return changed;
   }
   const weekendSync = { busy: false, last: "", error: "", timer: 0 };
@@ -2213,7 +2232,7 @@
         vipSync.error = "";
         if (sameJson(next, sanitizeVipPlan(data.vipPlan))) return 0;
         data.vipPlan = next;
-        persist();
+        persistQuiet();
         render();
         return 1;
       })
