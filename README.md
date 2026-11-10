@@ -12,7 +12,7 @@ A true custom hostname such as `sss.yourteam.com` is free on GitHub Pages, but y
 
 ## Weekend Cover
 
-The **Weekend shift** and **VIP coverage** buttons in the header open those tabs of the Google Sheet inside the calendar. You can edit there if your Google account has edit access; otherwise it is view only. If the embedded sheet asks you to sign in or will not let you edit, use **Open in Google Sheets** in the panel bar. Browsers that block third-party cookies (Safari, Firefox, private windows) may show view only inside the calendar.
+The **Shift Sheet** button in the header opens the Google Sheet inside the calendar, starting on the Weekend Cover tab. Use the tabs at the bottom to switch sheets. You can edit there if your Google account has edit access; otherwise it is view only. If the embedded sheet asks you to sign in or will not let you edit, use **Open in Google Sheets** in the panel bar. Browsers that block third-party cookies (Safari, Firefox, private windows) may show view only inside the calendar.
 
 The calendar also reads Saturday Actual Cover from that sheet on load, when you come back to the tab, and about every 45 seconds. This works today because the Weekend Cover tab is shared as **Anyone with the link can view** (edit access stays limited to the team). If that sharing is ever turned off, the live read stops and Saturdays keep their last synced names. The fallback is:
 

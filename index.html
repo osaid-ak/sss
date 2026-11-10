@@ -826,8 +826,7 @@
       </div>
       <div class="actions">
         <span class="editing-flag hidden" id="editFlag">Editing</span>
-        <button type="button" class="ghost" id="sheetWeekendBtn">Weekend shift</button>
-        <button type="button" class="ghost" id="sheetVipBtn">VIP coverage</button>
+        <button type="button" class="ghost" id="sheetBtn">Shift Sheet</button>
         <button type="button" class="ghost" id="syncWeekendBtn">Sync sheet</button>
         <div class="pop-wrap">
           <button type="button" class="ghost" id="themeBtn">Theme</button>
@@ -865,7 +864,7 @@
   <section class="sheet-panel hidden" id="sheetPanel" aria-label="Google Sheet">
     <div class="sheet-bar">
       <strong id="sheetTitle"></strong>
-      <span class="sheet-hint">Changes save straight to the Google Sheet if your Google account can edit it. The calendar picks them up within seconds.</span>
+      <span class="sheet-hint">Use the tabs at the bottom to switch sheets. Changes save to the Google Sheet if your Google account can edit it, and the calendar picks them up within seconds.</span>
       <span class="sheet-actions">
         <a class="ghost" id="sheetOpenLink" target="_blank" rel="noopener noreferrer">Open in Google Sheets</a>
         <button type="button" class="ghost" id="sheetReloadBtn">Reload</button>
@@ -2225,44 +2224,38 @@
       .finally(() => { vipSync.busy = false; });
   }
 
-  const SHEET_TABS = {
-    weekend: { title: "Weekend shift", gid: WEEKEND_SHEET_GID, button: "sheetWeekendBtn" },
-    vip: { title: "VIP coverage", gid: VIP_SHEET_GID, button: "sheetVipBtn" }
-  };
-  const sheetPanel = { open: null, loaded: "", timer: 0 };
-  function sheetUrl(gid, embedded) {
-    return "https://docs.google.com/spreadsheets/d/" + WEEKEND_SHEET_ID + "/edit?gid=" + gid +
-      (embedded ? "&rm=minimal" : "") + "#gid=" + gid;
+  const sheetPanel = { open: false, loaded: false, timer: 0 };
+  // The whole workbook opens on the Weekend Cover tab. People switch tabs inside the sheet.
+  function sheetUrl(embedded) {
+    return "https://docs.google.com/spreadsheets/d/" + WEEKEND_SHEET_ID + "/edit?gid=" + WEEKEND_SHEET_GID +
+      (embedded ? "&rm=minimal" : "") + "#gid=" + WEEKEND_SHEET_GID;
   }
   function pullSheets() {
     return Promise.all([pullWeekendCover(false), pullVipPlan()]);
   }
   function closeSheetPanel() {
     if (!sheetPanel.open) return;
-    sheetPanel.open = null;
+    sheetPanel.open = false;
     clearInterval(sheetPanel.timer);
     sheetPanel.timer = 0;
     document.getElementById("sheetPanel").classList.add("hidden");
     document.querySelector(".app").classList.remove("sheet-open");
-    Object.keys(SHEET_TABS).forEach(k => document.getElementById(SHEET_TABS[k].button).classList.remove("on"));
+    document.getElementById("sheetBtn").classList.remove("on");
     pullSheets();
   }
-  function openSheetPanel(kind) {
-    const tab = SHEET_TABS[kind];
-    if (!tab) return;
-    if (sheetPanel.open === kind) { closeSheetPanel(); return; }
+  function openSheetPanel() {
+    if (sheetPanel.open) { closeSheetPanel(); return; }
     closePops();
-    sheetPanel.open = kind;
-    document.getElementById("sheetTitle").textContent = tab.title;
-    document.getElementById("sheetOpenLink").href = sheetUrl(tab.gid, false);
-    const frame = document.getElementById("sheetFrame");
-    if (sheetPanel.loaded !== kind) {
-      frame.src = sheetUrl(tab.gid, true);
-      sheetPanel.loaded = kind;
+    sheetPanel.open = true;
+    document.getElementById("sheetTitle").textContent = "Shift Sheet";
+    document.getElementById("sheetOpenLink").href = sheetUrl(false);
+    if (!sheetPanel.loaded) {
+      document.getElementById("sheetFrame").src = sheetUrl(true);
+      sheetPanel.loaded = true;
     }
     document.getElementById("sheetPanel").classList.remove("hidden");
     document.querySelector(".app").classList.add("sheet-open");
-    Object.keys(SHEET_TABS).forEach(k => document.getElementById(SHEET_TABS[k].button).classList.toggle("on", k === kind));
+    document.getElementById("sheetBtn").classList.add("on");
     clearInterval(sheetPanel.timer);
     sheetPanel.timer = setInterval(() => {
       if (document.visibilityState === "visible") pullSheets();
@@ -6230,12 +6223,10 @@
     download("shift-plan-" + viewName + "-" + dateKey(ui.cursor) + ".html", "<!DOCTYPE html>\n" + html, "text/html");
   }
 
-  document.getElementById("sheetWeekendBtn").addEventListener("click", () => openSheetPanel("weekend"));
-  document.getElementById("sheetVipBtn").addEventListener("click", () => openSheetPanel("vip"));
+  document.getElementById("sheetBtn").addEventListener("click", openSheetPanel);
   document.getElementById("sheetCloseBtn").addEventListener("click", closeSheetPanel);
   document.getElementById("sheetReloadBtn").addEventListener("click", () => {
-    const tab = SHEET_TABS[sheetPanel.open];
-    if (tab) document.getElementById("sheetFrame").src = sheetUrl(tab.gid, true);
+    if (sheetPanel.open) document.getElementById("sheetFrame").src = sheetUrl(true);
   });
   ["viewTabs", "prevBtn", "nextBtn", "todayBtn", "closedToggle"].forEach(id => {
     document.getElementById(id).addEventListener("click", closeSheetPanel);
