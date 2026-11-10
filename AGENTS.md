@@ -25,6 +25,8 @@ Do not commit `coverage-calendar.html`, `serve-calendar.py`, or secrets. On Powe
 
 Edits sync through the shared plan named `TEAM_PLAN` in the calendar file. A browser also keeps a local copy. Do not describe the calendar as Export/Import only.
 
+Each browser keeps up to 5 automatic backups (local storage key `coverage-calendar-backups`), taken before a teammate or merged update (at most every 15 minutes) and before a JSON import or restore. Lead tools has Restore backup. Import asks for confirmation because it replaces the shared plan. Browser panes that block storage skip backups silently.
+
 Saturday names come from the Weekend Cover sheet (Planned, then Swap). The sheet has no time columns. The product windows are Phase 1 8pm–2am and VIP 5pm–2am. Display re-applies those windows, then adds one hour when DST is on. Do not make that spreadsheet world-editable. Do not rewrite stored clocks unless the user asks.
 
 ## Standing rules

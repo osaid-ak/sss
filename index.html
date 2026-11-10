@@ -821,6 +821,7 @@
             <button type="button" id="dstBtn">DST +1 hour</button>
             <button type="button" id="exportBtn">Export JSON</button>
             <button type="button" id="importBtn">Import</button>
+            <button type="button" id="restoreBtn">Restore backup</button>
             <button type="button" id="snapshotBtn">Save snapshot</button>
             <button type="button" id="lockAccessBtn">Lock access</button>
           </div>
@@ -1441,6 +1442,28 @@
       localStorage.setItem(TEAM_SYNC_KEY, JSON.stringify({ updatedAt: updatedAt || "", calendar }));
     } catch (_) {}
   }
+  const BACKUP_KEY = "coverage-calendar-backups";
+  const BACKUP_KEEP = 5;
+  const BACKUP_GAP_MS = 15 * 60 * 1000;
+  function readBackups() {
+    try {
+      const list = JSON.parse(localStorage.getItem(BACKUP_KEY) || "[]");
+      return Array.isArray(list) ? list.filter(b => b && b.calendar && b.at) : [];
+    } catch (_) { return []; }
+  }
+  function takeBackup(reason, force) {
+    if (openedFromSnapshot) return;
+    if (!hadLocalPlan && !data.updatedAt) return;
+    try {
+      const list = readBackups();
+      const calendar = calendarCopy();
+      const json = contentOf(calendar);
+      if (list.length && contentOf(list[0].calendar) === json) return;
+      if (!force && list.length && Date.now() - Date.parse(list[0].at) < BACKUP_GAP_MS) return;
+      list.unshift({ at: new Date().toISOString(), reason, calendar });
+      localStorage.setItem(BACKUP_KEY, JSON.stringify(list.slice(0, BACKUP_KEEP)));
+    } catch (_) {}
+  }
   function sameJson(a, b) {
     return JSON.stringify(a) === JSON.stringify(b);
   }
@@ -1566,6 +1589,7 @@
   function applyTeamDoc(doc) {
     const calendar = preparedCalendar(doc && doc.calendar);
     if (!calendar) return;
+    takeBackup("Before a teammate update");
     teamPending = null;
     teamQuiet = true;
     data = calendar;
@@ -1623,6 +1647,7 @@
       return;
     }
     const at = mergedJson === localJson && localAt >= remoteAt ? (localAt || new Date().toISOString()) : new Date().toISOString();
+    takeBackup("Before a merged update");
     teamQuiet = true;
     data = merged;
     data.pin = LEAD_PIN;
@@ -4086,7 +4111,7 @@
         <div class="day-stats">
           <span>Peak Phase 1 <b>${cov.minPhase}</b></span>
           <span>Peak VIP <b>${cov.minVip}</b></span>
-          ${cover ? "" : `<span>Line <b>${cov.minLine}</b></span>`}
+          ${cover ? "" : `<span>Line min <b>${cov.minLine}</b></span>`}
           ${hasActiveFilter() ? "<span>Filtered view</span>" : ""}
         </div>
       </div>
@@ -6017,13 +6042,31 @@
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      try {
-        data = sanitizeData(JSON.parse(reader.result));
-        persist();
-        render();
-      } catch (_) { alert("Could not read that JSON file."); }
+      let next;
+      try { next = sanitizeData(JSON.parse(reader.result)); }
+      catch (_) { alert("Could not read that JSON file."); return; }
+      if (!confirm("Replace the whole shared plan with this file? Everyone on the team will see it. A backup of the current plan is kept so you can use Restore backup.")) return;
+      takeBackup("Before importing a file", true);
+      data = next;
+      persist();
+      render();
     };
     reader.readAsText(file);
+  });
+  document.getElementById("restoreBtn").addEventListener("click", () => {
+    const list = readBackups();
+    if (!list.length) { alert("No backups yet. They are saved automatically before a teammate update or an import."); return; }
+    const lines = list.map((b, i) => (i + 1) + ". " + new Date(b.at).toLocaleString() + " — " + (b.reason || "Backup"));
+    const pick = prompt("Restore which backup? Type its number.\n\n" + lines.join("\n"), "1");
+    if (pick === null) return;
+    const chosen = list[Number(pick) - 1];
+    if (!chosen) { alert("That is not a backup number."); return; }
+    if (!confirm("Replace the shared plan with the backup from " + new Date(chosen.at).toLocaleString() + "? Everyone on the team will see it.")) return;
+    takeBackup("Before restoring a backup", true);
+    data = sanitizeData(JSON.parse(JSON.stringify(chosen.calendar)));
+    ui.accessOpen = false;
+    persist();
+    render();
   });
   window.addEventListener("resize", () => {
     if (ui.view === "day") buildPlanner();
