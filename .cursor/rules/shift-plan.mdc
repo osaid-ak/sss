@@ -1,0 +1,12 @@
+---
+description: How to work on the Shift Plan calendar and keep the handoff current
+alwaysApply: true
+---
+
+# Shift Plan
+
+Before changing the calendar, read `AGENTS.md`. It is the product handoff: what the page is, how to publish, and the rules already in force.
+
+When a change alters behavior, publish steps, or those rules, update `AGENTS.md` in the same change. Keep `README.md` consistent with it.
+
+Edit `coverage-calendar.html`, copy it to `index.html`, and commit only `index.html` for calendar changes. Do not commit `coverage-calendar.html` or `serve-calendar.py`. Do not print the lead PIN.

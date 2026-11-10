@@ -21,7 +21,9 @@ The calendar also reads Saturday Actual Cover from that sheet on load, when you 
 
 ## What testers should know
 
-Schedule edits live in **each person’s browser**. They do not sync to each other unless someone uses Export / Import.
+Schedule edits sync to the shared team plan, so a change on one browser shows up for the rest of the team. Each browser also keeps a local copy.
+
+Product rules and how to publish a change are in [AGENTS.md](AGENTS.md).
 
 ## Safety of a public GitHub repo
 
