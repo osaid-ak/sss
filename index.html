@@ -767,6 +767,17 @@
   .tabs button.on { background: var(--chip-on); color: var(--chip-on-ink); border-color: var(--chip-on); }
   .badge { background: var(--gap); color: #fff; border-radius: 999px; font-size: 10px; padding: 1px 6px; margin-left: 4px; }
   .hidden { display: none !important; }
+  .ghost.on { background: var(--chip-on); color: var(--chip-on-ink); border-color: var(--chip-on); }
+  .app.sheet-open .workspace, .app.sheet-open .hint { display: none; }
+  .sheet-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .sheet-bar {
+    display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap;
+    padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--paper);
+  }
+  .sheet-bar strong { font-family: var(--serif); font-size: 16px; letter-spacing: -0.02em; }
+  .sheet-hint { color: var(--muted); font-size: 12px; flex: 1 1 260px; min-width: 0; }
+  .sheet-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  .sheet-panel iframe { flex: 1; min-height: 0; width: 100%; border: 0; background: #fff; }
   .pin-err { color: var(--gap); font-size: 13px; font-weight: 600; margin: 8px 0 0; }
   button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
     outline: 2px solid var(--phase); outline-offset: 2px;
@@ -815,6 +826,8 @@
       </div>
       <div class="actions">
         <span class="editing-flag hidden" id="editFlag">Editing</span>
+        <button type="button" class="ghost" id="sheetWeekendBtn">Weekend shift</button>
+        <button type="button" class="ghost" id="sheetVipBtn">VIP coverage</button>
         <button type="button" class="ghost" id="syncWeekendBtn">Sync sheet</button>
         <div class="pop-wrap">
           <button type="button" class="ghost" id="themeBtn">Theme</button>
@@ -829,7 +842,6 @@
             <div class="pop-label">View</div>
             <button type="button" id="printBtn">Print</button>
             <button type="button" id="viewExportBtn">Export</button>
-            <a id="weekendCoverLink" href="https://docs.google.com/spreadsheets/d/1k-2i2LNA_tnsEQVghJvVH7F16-8C8HxvUFwIe3RZ7IM/edit?pli=1&gid=1806071421#gid=1806071421" target="_blank" rel="noopener noreferrer">Weekend Coverage</a>
             <div class="pop-label">Lead tools</div>
             <button type="button" id="editBtn">Edit schedule</button>
             <button type="button" id="rosterBtn">Edit roster</button>
@@ -850,6 +862,18 @@
     <aside class="filter-bar" id="teamPane"></aside>
     <main id="main"></main>
   </div>
+  <section class="sheet-panel hidden" id="sheetPanel" aria-label="Google Sheet">
+    <div class="sheet-bar">
+      <strong id="sheetTitle"></strong>
+      <span class="sheet-hint">Changes save straight to the Google Sheet if your Google account can edit it. The calendar picks them up within seconds.</span>
+      <span class="sheet-actions">
+        <a class="ghost" id="sheetOpenLink" target="_blank" rel="noopener noreferrer">Open in Google Sheets</a>
+        <button type="button" class="ghost" id="sheetReloadBtn">Reload</button>
+        <button type="button" class="primary" id="sheetCloseBtn">Back to calendar</button>
+      </span>
+    </div>
+    <iframe id="sheetFrame" title="Google Sheet" allow="clipboard-read; clipboard-write"></iframe>
+  </section>
 </div>
 <input id="fileIn" type="file" accept="application/json" class="hidden">
 <input id="hpFileIn" type="file" accept=".csv,.tsv,.txt,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
@@ -2199,6 +2223,50 @@
         return 0;
       })
       .finally(() => { vipSync.busy = false; });
+  }
+
+  const SHEET_TABS = {
+    weekend: { title: "Weekend shift", gid: WEEKEND_SHEET_GID, button: "sheetWeekendBtn" },
+    vip: { title: "VIP coverage", gid: VIP_SHEET_GID, button: "sheetVipBtn" }
+  };
+  const sheetPanel = { open: null, loaded: "", timer: 0 };
+  function sheetUrl(gid, embedded) {
+    return "https://docs.google.com/spreadsheets/d/" + WEEKEND_SHEET_ID + "/edit?gid=" + gid +
+      (embedded ? "&rm=minimal" : "") + "#gid=" + gid;
+  }
+  function pullSheets() {
+    return Promise.all([pullWeekendCover(false), pullVipPlan()]);
+  }
+  function closeSheetPanel() {
+    if (!sheetPanel.open) return;
+    sheetPanel.open = null;
+    clearInterval(sheetPanel.timer);
+    sheetPanel.timer = 0;
+    document.getElementById("sheetPanel").classList.add("hidden");
+    document.querySelector(".app").classList.remove("sheet-open");
+    Object.keys(SHEET_TABS).forEach(k => document.getElementById(SHEET_TABS[k].button).classList.remove("on"));
+    pullSheets();
+  }
+  function openSheetPanel(kind) {
+    const tab = SHEET_TABS[kind];
+    if (!tab) return;
+    if (sheetPanel.open === kind) { closeSheetPanel(); return; }
+    closePops();
+    sheetPanel.open = kind;
+    document.getElementById("sheetTitle").textContent = tab.title;
+    document.getElementById("sheetOpenLink").href = sheetUrl(tab.gid, false);
+    const frame = document.getElementById("sheetFrame");
+    if (sheetPanel.loaded !== kind) {
+      frame.src = sheetUrl(tab.gid, true);
+      sheetPanel.loaded = kind;
+    }
+    document.getElementById("sheetPanel").classList.remove("hidden");
+    document.querySelector(".app").classList.add("sheet-open");
+    Object.keys(SHEET_TABS).forEach(k => document.getElementById(SHEET_TABS[k].button).classList.toggle("on", k === kind));
+    clearInterval(sheetPanel.timer);
+    sheetPanel.timer = setInterval(() => {
+      if (document.visibilityState === "visible") pullSheets();
+    }, 20000);
   }
 
   function approvedLeaves() {
@@ -6162,6 +6230,16 @@
     download("shift-plan-" + viewName + "-" + dateKey(ui.cursor) + ".html", "<!DOCTYPE html>\n" + html, "text/html");
   }
 
+  document.getElementById("sheetWeekendBtn").addEventListener("click", () => openSheetPanel("weekend"));
+  document.getElementById("sheetVipBtn").addEventListener("click", () => openSheetPanel("vip"));
+  document.getElementById("sheetCloseBtn").addEventListener("click", closeSheetPanel);
+  document.getElementById("sheetReloadBtn").addEventListener("click", () => {
+    const tab = SHEET_TABS[sheetPanel.open];
+    if (tab) document.getElementById("sheetFrame").src = sheetUrl(tab.gid, true);
+  });
+  ["viewTabs", "prevBtn", "nextBtn", "todayBtn", "closedToggle"].forEach(id => {
+    document.getElementById(id).addEventListener("click", closeSheetPanel);
+  });
   document.getElementById("viewTabs").addEventListener("click", e => {
     const b = e.target.closest("button");
     if (b) setView(b.dataset.view);
@@ -6268,10 +6346,6 @@
     renderChrome();
     exportCurrentView();
   });
-  document.getElementById("weekendCoverLink").addEventListener("click", () => {
-    ui.accessOpen = false;
-    renderChrome();
-  });
   document.getElementById("syncWeekendBtn").addEventListener("click", () => {
     Promise.all([pullWeekendCover(true), pullVipPlan()]).then(([changed, vipChanged]) => {
       const lines = [];
@@ -6338,6 +6412,7 @@
   });
 
   document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !ui.modal && sheetPanel.open) { closeSheetPanel(); return; }
     if (e.key === "Escape" && ui.modal) {
       e.preventDefault();
       ui.afterPin = null;
