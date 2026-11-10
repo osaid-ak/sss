@@ -490,24 +490,8 @@
     padding: 3px 8px; font-size: 11px; color: var(--muted); font-weight: 600;
   }
   .day-stats b { color: var(--ink); }
-  .day-boards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 4px 0 16px; }
-  .day-board {
-    border: 1px solid var(--line); border-radius: 12px; background: var(--paper);
-    padding: 12px 14px 14px; min-width: 0;
-  }
-  .day-board h3 {
-    margin: 0 0 8px; font-size: 12px; font-weight: 800; letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
-  .day-board.phase h3 { color: var(--phase); }
-  .day-board.vip h3 { color: var(--vip); }
-  .day-board.lead h3 { color: var(--lead); }
-  .day-board .who { margin: 0; }
-  .day-board .empty-note { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
-  .day-line-board { margin: 0 0 16px; }
   .planner { flex: 1; min-height: 0; padding: 0 28px 16px 16px; overflow: auto; }
-  .planner-inner { position: relative; }
-  .planner-scale { position: relative; min-width: 860px; }
+  .planner-inner { position: relative; min-width: 860px; }
   .planner-head {
     position: sticky; top: 0; z-index: 8;
     background: var(--paper);
@@ -769,8 +753,7 @@
   .pin-err { color: var(--gap); font-size: 13px; font-weight: 600; margin: 8px 0 0; }
   @media (max-width: 900px) {
     .month-grid, .week-grid,
-    .month-grid.hide-closed, .week-grid.hide-closed,
-    .day-boards { grid-template-columns: 1fr; }
+    .month-grid.hide-closed, .week-grid.hide-closed { grid-template-columns: 1fr; }
     .nav-title { min-width: 0; }
   }
   @media print {
@@ -3974,7 +3957,7 @@
     if (r.line) return "line";
     return "lead";
   }
-  function weekWhoHtml(day, shown, skipLine) {
+  function weekWhoHtml(day, shown) {
     const away = day.away;
     const rank = { lead: 0, vip: 1, phase: 2, both: 3, line: 4 };
     const people = shown.slice().sort((a, b) => {
@@ -4000,7 +3983,7 @@
         html += `<div class="who-person ${off ? "off" : "q-" + weekTone(p)}"><button type="button" data-filter-name="${esc(p.name)}">${esc(p.name)}</button></div>`;
       }
     }
-    if (!skipLine) html += weekLineHtml(day, shown);
+    html += weekLineHtml(day, shown);
     return `<div class="who">${html}</div>`;
   }
   function weekLineHtml(day, shown) {
@@ -4142,50 +4125,6 @@
     if (ui.view === "day") buildPlanner();
   }
 
-  function dayBoard(title, tone, body) {
-    const board = document.createElement("article");
-    board.className = "day-board " + tone;
-    const h = document.createElement("h3");
-    h.textContent = title;
-    board.appendChild(h);
-    const hold = document.createElement("div");
-    hold.innerHTML = body;
-    board.appendChild(hold);
-    board.querySelectorAll("[data-filter-name]").forEach(el => {
-      el.addEventListener("click", e => {
-        e.stopPropagation();
-        togglePersonFilter(el.dataset.filterName);
-      });
-    });
-    return board;
-  }
-  function appendDayBoards(planner, day, shown) {
-    const phase = shown.filter(p => rolesOf(p).phase1);
-    const vip = shown.filter(p => rolesOf(p).vip);
-    const leads = shown.filter(p => {
-      const r = rolesOf(p);
-      return r.lead && !r.phase1 && !r.vip;
-    });
-    const grid = document.createElement("div");
-    grid.className = "day-boards";
-    grid.appendChild(dayBoard("Phase 1", "phase", phase.length ? weekWhoHtml(day, phase, true) : `<p class="empty-note">No one on Phase 1.</p>`));
-    grid.appendChild(dayBoard("VIP", "vip", vip.length ? weekWhoHtml(day, vip, true) : `<p class="empty-note">No one on VIP.</p>`));
-    planner.appendChild(grid);
-    if (leads.length) planner.appendChild(dayBoard("Leads", "lead", weekWhoHtml(day, leads, true)));
-    const line = weekLineHtml(day, shown);
-    if (!line) return;
-    const box = document.createElement("div");
-    box.className = "day-line-board";
-    box.innerHTML = line;
-    box.querySelectorAll("[data-filter-name]").forEach(el => {
-      el.addEventListener("click", e => {
-        e.stopPropagation();
-        togglePersonFilter(el.dataset.filterName);
-      });
-    });
-    planner.appendChild(box);
-  }
-
   function buildPlanner() {
     const planner = document.getElementById("planner");
     if (!planner) return;
@@ -4196,49 +4135,41 @@
     let colW = (avail - LABEL_W) / SLOTS;
     if (colW < MIN_COL) colW = MIN_COL;
     const trackW = colW * SLOTS;
-    planner.style.minWidth = "";
+    planner.style.minWidth = (LABEL_W + trackW) + "px";
     planner.innerHTML = "";
-
-    const shown = visiblePeople(day, key);
-    if (hasActiveFilter() && !shown.length) {
-      const empty = document.createElement("p");
-      empty.className = "empty-box";
-      empty.innerHTML = "<b>Not scheduled</b>Nobody in this filter works this night.";
-      planner.appendChild(empty);
-      return;
-    }
-    if (!ui.editing) appendDayBoards(planner, day, shown);
-
-    const scale = document.createElement("div");
-    scale.className = "planner-scale";
-    scale.style.minWidth = (LABEL_W + trackW) + "px";
-    planner.appendChild(scale);
 
     const head = document.createElement("div");
     head.className = "planner-head";
     head.appendChild(makeAxis(colW));
     const peakWin = peakWindow();
     head.appendChild(makeBand(colW, peakWin.start, peakWin.end, "Peak " + windowLabel(peakWin.start, peakWin.end) + " PKT", "peak"));
-    scale.appendChild(head);
+    planner.appendChild(head);
 
-    if (ui.editing) {
-      const groups = [];
-      day.people.forEach((p, idx) => {
-        if (!personMatches(p, day, key)) return;
-        let g = groups.find(x => x.title === p.group);
-        if (!g) { g = { title: p.group, idxs: [] }; groups.push(g); }
-        g.idxs.push(idx);
-      });
-      groups.forEach(g => {
-        const h = document.createElement("div");
-        h.className = "section";
-        h.textContent = g.title;
-        scale.appendChild(h);
-        g.idxs.forEach(idx => scale.appendChild(makeRow(day, idx, colW, trackW, key)));
-      });
-      const lineWin = lineWindow();
-      scale.appendChild(makeBand(colW, lineWin.start, lineWin.end, "Support Line " + windowLabel(lineWin.start, lineWin.end) + " PKT", "line"));
+    const groups = [];
+    day.people.forEach((p, idx) => {
+      if (!personMatches(p, day, key)) return;
+      let g = groups.find(x => x.title === p.group);
+      if (!g) { g = { title: p.group, idxs: [] }; groups.push(g); }
+      g.idxs.push(idx);
+    });
+    if (hasActiveFilter() && !groups.length) {
+      const empty = document.createElement("p");
+      empty.className = "empty-box";
+      empty.innerHTML = "<b>Not scheduled</b>Nobody in this filter works this night.";
+      planner.appendChild(empty);
+      return;
     }
+
+    groups.forEach(g => {
+      const h = document.createElement("div");
+      h.className = "section";
+      h.textContent = g.title;
+      planner.appendChild(h);
+      g.idxs.forEach(idx => planner.appendChild(makeRow(day, idx, colW, trackW, key)));
+    });
+
+    const lineWin = lineWindow();
+    planner.appendChild(makeBand(colW, lineWin.start, lineWin.end, "Support Line " + windowLabel(lineWin.start, lineWin.end) + " PKT", "line"));
 
     const wrap = document.createElement("div");
     wrap.className = "avail-wrap";
@@ -4268,7 +4199,7 @@
       row.appendChild(strip);
       wrap.appendChild(row);
     });
-    scale.appendChild(wrap);
+    planner.appendChild(wrap);
     planner.dataset.colw = colW;
     if (ui.editing) attachDrag(planner, key, colW);
   }
