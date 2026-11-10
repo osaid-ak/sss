@@ -835,7 +835,6 @@
             <button type="button" id="rosterBtn">Edit roster</button>
             <button type="button" id="reviewBtn">Add leave</button>
             <button type="button" id="holidayBtn">Plan holiday</button>
-            <button type="button" id="dstBtn">DST +1 hour</button>
             <button type="button" id="exportBtn">Export JSON</button>
             <button type="button" id="importBtn">Import</button>
             <button type="button" id="restoreBtn">Restore backup</button>
@@ -885,13 +884,29 @@
   const PEAK_END = 18;
   const LINE_START = 4;
   const LINE_END = 24;
-  function dstSlots() { return data.dst ? 2 : 0; }
-  function peakWindow() {
-    const off = dstSlots();
+  let windowDayKey = "";
+  function nthSunday(y, m, n) {
+    const first = new Date(y, m, 1).getDay();
+    return (7 - first) % 7 + 1 + 7 * (n - 1);
+  }
+  // US Eastern: daylight time runs from the 2nd Sunday of March to the 1st Sunday of November.
+  // Stored clocks are the summer (EDT) schedule. In standard time (EST) every shift sits one hour later in PKT.
+  function isEasternStandard(date) {
+    const y = date.getFullYear();
+    const dstStart = new Date(y, 2, nthSunday(y, 2, 2));
+    const dstEnd = new Date(y, 10, nthSunday(y, 10, 1));
+    return date < dstStart || date >= dstEnd;
+  }
+  function dayKeyFor(key) {
+    return key || windowDayKey || (ui.modal === "holiday" && ui.holidayDate) || dateKey(ui.cursor);
+  }
+  function dstSlots(key) { return isEasternStandard(parseKey(dayKeyFor(key))) ? 2 : 0; }
+  function peakWindow(key) {
+    const off = dstSlots(key);
     return { start: PEAK_START + off, end: PEAK_END + off };
   }
-  function lineWindow() {
-    const off = dstSlots();
+  function lineWindow(key) {
+    const off = dstSlots(key);
     return { start: LINE_START + off, end: LINE_END + off };
   }
   function windowLabel(start, end) {
@@ -1070,15 +1085,18 @@
   }
   function applyPersonHours(name, hours, scope, month, skipPersist) {
     if (!hours) return false;
-    const stamp = (bucket) => {
+    const stamp = (bucket, h) => {
+      h = h || hours;
       const p = bucket.people.find(x => x.name === name);
-      if (p) applyHoursToPerson(p, hours.start, hours.len, hours.brk);
-      if (hours.line) applyLineHours(bucket, name, hours.line.start, hours.line.len);
+      if (p) applyHoursToPerson(p, h.start, h.len, h.brk);
+      if (h.line) applyLineHours(bucket, name, h.line.start, h.line.len);
     };
     if (scope === "month" && month) {
       daysInMonth(month).forEach(key => {
         if (isClosedDay(key) || weekendCoverOf(key)) return;
-        stamp(ensureDay(key));
+        const off = dstSlots(key);
+        // Roster hours are the summer schedule, so a standard-time day shows them one hour later.
+        stamp(ensureDay(key), off ? { start: hours.start + off, len: hours.len, brk: hours.brk + off, line: hours.line ? { start: hours.line.start + off, len: hours.line.len } : null } : hours);
       });
     } else {
       stamp(data);
@@ -1294,19 +1312,22 @@
       });
     });
   }
-  function setDst(on) {
-    const next = !!on;
-    if (next === !!data.dst) return;
-    shiftAllClocks(next ? 2 : -2);
-    data.dst = next;
-    persist();
-    render();
-  }
   function sanitizeData(raw) {
     const d = defaultData();
     if (!raw || typeof raw !== "object") return d;
     const oldOrigin = Number.isFinite(raw.slotOrigin) ? raw.slotOrigin : OLD_SLOT_ORIGIN;
     shiftStoredSlots(raw, (oldOrigin - START_MIN) / SLOT_MIN);
+    if (raw.dst === true) {
+      // Older versions kept one global DST switch and shifted every stored clock. Stored clocks are now always the summer schedule.
+      shiftStoredSlots(raw, -2);
+      (raw.holidays || []).forEach(plan => {
+        Object.values((plan && plan.hours) || {}).forEach(row => {
+          Object.values(row || {}).forEach(span => {
+            if (span && Number.isFinite(span.start) && Number.isFinite(span.end)) { span.start -= 2; span.end -= 2; }
+          });
+        });
+      });
+    }
     d.slotOrigin = START_MIN;
     if (Array.isArray(raw.people) && raw.people.length) {
       d.people = raw.people.map((p, i) => sanitizePerson(p, DEFAULT_PEOPLE[i] || DEFAULT_PEOPLE[0]));
@@ -1350,7 +1371,7 @@
       if (isSaturday(k) && !(d.days[k] && d.days[k].weekendCover)) delete d.days[k];
     });
     d.updatedAt = typeof raw.updatedAt === "string" ? raw.updatedAt : "";
-    d.dst = raw.dst === true;
+    d.dst = false;
     return d;
   }
 
@@ -1540,7 +1561,7 @@
       leaves: mergeRecords(base && base.leaves, remote && remote.leaves, local && local.leaves, remoteAt, localAt, item => item && item.id),
       holidays: mergeRecords(base && base.holidays, remote && remote.holidays, local && local.holidays, remoteAt, localAt, item => item && item.id),
       days: mergeDays(base && base.days, remote && remote.days, local && local.days, remoteAt, localAt),
-      dst: pickField(base && base.dst, remote && remote.dst, local && local.dst, remoteAt, localAt) === true,
+      dst: false,
       slotOrigin: START_MIN
     };
   }
@@ -1756,18 +1777,18 @@
   function weekendBreak(start, len) {
     return clamp(start + Math.max(0, Math.floor(len / 2) - 1), start, start + len - 2);
   }
-  function weekendHours(kind) {
-    const start = (kind === "phase1" ? P1_WKND_START : VIP_WKND_START) + (data.dst ? 2 : 0);
+  function weekendHours(kind, key) {
+    const start = (kind === "phase1" ? P1_WKND_START : VIP_WKND_START) + dstSlots(key);
     const len = kind === "phase1" ? P1_WKND_LEN : VIP_WKND_LEN;
     return { start, len };
   }
-  function weekendCoverPerson(name, kind) {
+  function weekendCoverPerson(name, kind, key) {
     const base = data.people.find(p => p.name === name);
     const person = sanitizePerson(base || {
       name,
       roles: { lead: false, phase1: kind === "phase1", vip: kind === "vip", line: false },
-      start: weekendHours(kind).start,
-      len: weekendHours(kind).len,
+      start: weekendHours(kind, key).start,
+      len: weekendHours(kind, key).len,
       brk: 0,
       split: null
     }, base);
@@ -1775,7 +1796,7 @@
     person.roles = rolesOf(person);
     person.roles.line = false;
     person.split = null;
-    const hours = weekendHours(kind);
+    const hours = weekendHours(kind, key);
     if (kind === "phase1") {
       person.roles.phase1 = true;
       person.roles.vip = false;
@@ -1793,12 +1814,12 @@
     const people = [];
     if (cover.phase1) {
       names.push(cover.phase1);
-      people.push(weekendCoverPerson(cover.phase1, "phase1"));
+      people.push(weekendCoverPerson(cover.phase1, "phase1", key));
     }
     (cover.vip || []).forEach(name => {
       if (!name || names.indexOf(name) !== -1) return;
       names.push(name);
-      people.push(weekendCoverPerson(name, "vip"));
+      people.push(weekendCoverPerson(name, "vip", key));
     });
     sortPeopleLikeRoster(people);
     data.days[key] = {
@@ -3497,7 +3518,7 @@
       const people = clone(src.people && src.people.length ? src.people : []);
       people.forEach(p => {
         const kind = p.name === cover.phase1 ? "phase1" : "vip";
-        const hours = weekendHours(kind);
+        const hours = weekendHours(kind, key);
         applyHoursToPerson(p, hours.start, hours.len, weekendBreak(hours.start, hours.len));
       });
       if (previewPlan && previewPlan.hours && previewPlan.hours[key]) {
@@ -3523,6 +3544,13 @@
     }
     const people = clone(src ? src.people : data.people);
     const lineBars = clone(src ? src.lineBars : data.lineBars);
+    if (!src) {
+      const off = dstSlots(key);
+      if (off) {
+        people.forEach(p => shiftPersonClock(p, off));
+        lineBars.forEach(b => shiftBarClock(b, off));
+      }
+    }
     if (previewPlan && previewPlan.hours && previewPlan.hours[key]) {
       Object.keys(previewPlan.hours[key]).forEach(name => {
         const h = previewPlan.hours[key][name];
@@ -3615,8 +3643,8 @@
         thin: nVip === 1
       };
     }
-    const peakWin = peakWindow();
-    const lineWin = lineWindow();
+    const peakWin = peakWindow(key);
+    const lineWin = lineWindow(key);
     const peakPhase = phase.slice(peakWin.start, peakWin.end);
     const peakVip = vip.slice(peakWin.start, peakWin.end);
     const lineSpan = line.slice(lineWin.start, lineWin.end);
@@ -4108,7 +4136,7 @@
     }
     const cover = weekendCoverOf(key);
     const weekendLine = cover
-      ? `Weekend cover from Actual Cover · Phase 1 ${slotLabel(weekendHours("phase1").start)}–${slotLabel(weekendHours("phase1").start + weekendHours("phase1").len)} · VIP ${slotLabel(weekendHours("vip").start)}–${slotLabel(weekendHours("vip").start + weekendHours("vip").len)} PKT${cover.status ? " · " + esc(cover.status) : ""}${cover.remarks ? " · " + esc(cover.remarks) : ""}`
+      ? `Weekend cover from Actual Cover · Phase 1 ${slotLabel(weekendHours("phase1", key).start)}–${slotLabel(weekendHours("phase1", key).start + weekendHours("phase1", key).len)} · VIP ${slotLabel(weekendHours("vip", key).start)}–${slotLabel(weekendHours("vip", key).start + weekendHours("vip", key).len)} PKT${cover.status ? " · " + esc(cover.status) : ""}${cover.remarks ? " · " + esc(cover.remarks) : ""}`
       : isSaturday(key)
         ? "Saturday follows Actual Cover only. Waiting to read the Weekend Cover sheet."
         : "";
@@ -4180,7 +4208,7 @@
     const head = document.createElement("div");
     head.className = "planner-head";
     head.appendChild(makeAxis(colW));
-    const peakWin = peakWindow();
+    const peakWin = peakWindow(key);
     head.appendChild(makeBand(colW, peakWin.start, peakWin.end, "Peak " + windowLabel(peakWin.start, peakWin.end) + " PKT", "peak"));
     head.appendChild(makeGapRow(colW, key));
     planner.appendChild(head);
@@ -4208,7 +4236,7 @@
       g.idxs.forEach(idx => planner.appendChild(makeRow(day, idx, colW, trackW, key)));
     });
 
-    const lineWin = lineWindow();
+    const lineWin = lineWindow(key);
     planner.appendChild(makeBand(colW, lineWin.start, lineWin.end, "Support Line " + windowLabel(lineWin.start, lineWin.end) + " PKT", "line"));
 
     const wrap = document.createElement("div");
@@ -4298,8 +4326,8 @@
     row.appendChild(lab);
     const cov = coverageFor(key);
     if (cov.weekend || cov.closed) { row.style.display = "none"; return row; }
-    const peak = peakWindow();
-    const lineWin = lineWindow();
+    const peak = peakWindow(key);
+    const lineWin = lineWindow(key);
     const marks = [];
     for (let s = 0; s < SLOTS; s++) {
       const bits = [];
@@ -4381,7 +4409,7 @@
     const track = document.createElement("div");
     track.className = "track";
     track.style.width = trackW + "px";
-    const peakWin = peakWindow();
+    const peakWin = peakWindow(key);
     const peak = document.createElement("div");
     peak.className = "peak-band";
     peak.style.left = (peakWin.start * colW) + "px";
@@ -5194,6 +5222,12 @@
       (cover ? " · covers " + cover : "");
   }
   function analyzeLeaveDay(name, key) {
+    const before = windowDayKey;
+    windowDayKey = key;
+    try { return analyzeLeaveDayFor(name, key); }
+    finally { windowDayKey = before; }
+  }
+  function analyzeLeaveDayFor(name, key) {
     if (isClosedDay(key)) return { key, closed: true };
     const day = resolveDay(key);
     const person = day.people.find(p => p.name === name);
@@ -5220,7 +5254,7 @@
     const weekend = weekendCoverOf(key);
     const ctx = { day, person, name };
     if (weekend && weekendCoverNames(key).has(name)) {
-      const wantStart = team === "phase1" ? P1_WKND_START : VIP_WKND_START;
+      const wantStart = (team === "phase1" ? P1_WKND_START : VIP_WKND_START) + dstSlots(key);
       const wantLen = Math.min(team === "phase1" ? P1_WKND_LEN : VIP_WKND_LEN, SHIFT_MAX);
       const covering = weekendCoverNames(key);
       const cands = coverMates(data.people, new Set(), name, team)
@@ -5505,7 +5539,7 @@
         </div>`;
       }).join("");
       box.innerHTML = `<h2>Edit roster</h2>
-        <p>Shift times are PKT first, with ET after. Add or remove people, drag the handle to rearrange, then tick roles and hours. Apply hours to all time or to one month.</p>
+        <p>Shift times are PKT first, with ET after. Add or remove people, drag the handle to rearrange, then tick roles and hours. Apply hours to all time or to one month. Roster hours are the summer (EDT) schedule. From the first Sunday of November to the second Sunday of March every shift shows one hour later in PKT automatically, so it stays on the same ET time.</p>
         <div class="hours-scope">
           <input id="newPersonName" type="text" placeholder="New person name" autocomplete="off">
           <button type="button" class="primary" id="addPersonBtn">Add person</button>
@@ -6024,11 +6058,6 @@
         render();
       });
     });
-    const dstBtn = document.getElementById("dstBtn");
-    if (dstBtn) {
-      dstBtn.textContent = data.dst ? "DST +1 hour on" : "DST +1 hour";
-      dstBtn.classList.toggle("on", !!data.dst);
-    }
   }
   function closePops() {
     const filtersWereOpen = ui.roleMenuOpen || ui.peopleMenuOpen || ui.awayMenuOpen;
@@ -6060,10 +6089,6 @@
   document.getElementById("holidayBtn").addEventListener("click", () => {
     closePops();
     openModal("holiday");
-  });
-  document.getElementById("dstBtn").addEventListener("click", e => {
-    e.stopPropagation();
-    setDst(!data.dst);
   });
   document.getElementById("accessBtn").addEventListener("click", e => {
     e.stopPropagation();
