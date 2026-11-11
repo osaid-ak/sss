@@ -4223,6 +4223,7 @@
         const ao = day.away.has(a.name) ? 1 : 0;
         const bo = day.away.has(b.name) ? 1 : 0;
         if (ao !== bo) return ao - bo;
+        if (a.start !== b.start) return a.start - b.start;
         return a.name.localeCompare(b.name);
       });
       const cover = weekendCoverOf(key);
