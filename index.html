@@ -4785,7 +4785,7 @@
         const cov = anchorCoverFor(g.block);
         const blk = vipBlockFor(key) || {};
         const opts = day.people
-          .filter(p => !rolesOf(p).lead && rolesOf(p)[g.kind === "late" ? "vip" : "phase1"] && p.name !== blk.late && p.name !== blk.phase1 && p.name !== cov.late && p.name !== cov.phase1)
+          .filter(p => !rolesOf(p).lead && rolesOf(p).vip && p.name !== blk.late && p.name !== blk.phase1 && p.name !== cov.late && p.name !== cov.phase1)
           .sort((a, b) => a.name.localeCompare(b.name))
           .map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");
         control = `<select data-anchor-pick="${g.kind}" aria-label="Anchor shift cover"><option value="">Choose cover</option>${opts}</select>` +
@@ -4793,7 +4793,7 @@
       } else {
         control = `<span class="late-ok">A lead can add cover from Access.</span>`;
       }
-      lines.push(`<div class="late-line"><strong>Anchor shift ${anchorLabel(g)} is uncovered.</strong> ${esc(g.person)} is on ${role} this block. ${control}</div>`);
+      lines.push(`<div class="late-line"><strong>Anchor shift ${anchorLabel(g)} is uncovered.</strong> ${esc(g.person)} is on ${role} this block. Add a VIP rep to hold it. ${control}</div>`);
     });
     const pqOff = phaseQueueNeed(day.away, key);
     if (pqOff) {
