@@ -4016,6 +4016,19 @@
       syncPersonDerived(bp);
     }
   }
+  // On days a lead edited by hand there is no automatic swap, but a bar held by the sheet's backup over an absent owner's slot is still labeled.
+  function markBackupBars(lineBars, away, key) {
+    const rot = lineRotationFor(key);
+    if (!rot || !rot.backup) return;
+    const off = dstSlots(key);
+    rot.slots.forEach((owner, i) => {
+      if (!owner || !away.has(owner) || !LINE_SLOTS[i]) return;
+      const lo = LINE_SLOTS[i].start + off, hi = lo + LINE_SLOTS[i].len;
+      lineBars.forEach(b => {
+        if (b.owner === rot.backup && b.start < hi && b.start + b.len > lo) { b.backupMark = true; b.backupFor = owner; }
+      });
+    });
+  }
   function lateStartFor(key) { return VIP_LATE_START + dstSlots(key); }
   function lateCoverFor(key) { return (data.lateCover && data.lateCover[key]) || null; }
   function applyLateCover(people, key) {
@@ -4123,6 +4136,7 @@
       return onLeave(p.name, key);
     }).map(p => p.name));
     if (!src) applyLineBackup(people, lineBars, awaySet, key);
+    else markBackupBars(lineBars, awaySet, key);
     return {
       people,
       lineBars,
@@ -4694,7 +4708,7 @@
       html += `<div class="who-time"><span>${esc(slotLabel(start))}</span><span>${on}</span></div>`;
       for (; i < j; i++) {
         const off = day.away.has(bars[i].owner);
-        html += `<div class="who-person ${off ? "off" : "q-line"}"><button type="button" data-filter-name="${esc(bars[i].owner)}">${esc(bars[i].owner)}${bars[i].backupInfo ? " (backup)" : ""}</button></div>`;
+        html += `<div class="who-person ${off ? "off" : "q-line"}"><button type="button" data-filter-name="${esc(bars[i].owner)}">${esc(bars[i].owner)}${bars[i].backupInfo || bars[i].backupMark ? " (backup)" : ""}</button></div>`;
       }
     }
     return html + "</div>";
@@ -5269,8 +5283,8 @@
       bar.dataset.hidx = bi;
       bar.style.left = (LABEL_W + b.start * colW) + "px";
       bar.style.width = (b.len * colW) + "px";
-      bar.textContent = "Line " + slotLabel(b.start) + "–" + slotLabel(b.start + b.len) + (b.backupInfo ? " (backup)" : "");
-      if (b.backupInfo) bar.title = p.name + " (backup) is covering " + b.backupInfo.owner + "'s Support Line slot.";
+      bar.textContent = "Line " + slotLabel(b.start) + "–" + slotLabel(b.start + b.len) + (b.backupInfo || b.backupMark ? " (backup)" : "");
+      if (b.backupInfo || b.backupMark) bar.title = p.name + " (backup) is covering " + (b.backupInfo ? b.backupInfo.owner : b.backupFor) + "'s Support Line slot.";
       if (b.start < p.start || b.start + b.len > p.start + p.len) {
         bar.style.boxShadow = "0 0 0 2px var(--gap)";
         bar.title = p.name + "'s Support Line duty runs outside their shift (" + slotLabel(p.start) + "–" + slotLabel(p.start + p.len) + "). That time is not counted as line cover.";
