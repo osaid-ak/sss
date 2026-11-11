@@ -3906,33 +3906,47 @@
     lineBars.splice(0, lineBars.length, ...bars);
   }
   // When the owner of a Support Line slot is off, the sheet's backup takes that slot.
-  // If the backup's shift does not cover the slot, the whole shift is moved (same length, same break position) so that it does.
+  // If the slot is already inside the backup's shift, only the Support Line bar is added. If it is not, the whole
+  // shift moves (same length, same break position) so that it is. One backup can only take the slots that fit into a single shift.
   function applyLineBackup(people, lineBars, away, key) {
     const rot = lineRotationFor(key);
     if (!rot || !rot.backup) return;
     const bp = people.find(x => x.name === rot.backup);
     if (!bp || away.has(bp.name)) return;
+    const missing = lineBars
+      .filter(b => away.has(b.owner) && rot.slots.includes(b.owner))
+      .sort((a, b) => a.start - b.start);
+    let winLo = null, winHi = null;
+    const taken = [];
+    missing.forEach(b => {
+      const lo = winLo == null ? b.start : Math.min(winLo, b.start);
+      const hi = winHi == null ? b.start + b.len : Math.max(winHi, b.start + b.len);
+      if (hi - lo > bp.len) { b.backupFail = true; return; }
+      winLo = lo;
+      winHi = hi;
+      taken.push(b);
+    });
+    if (!taken.length) return;
+    const from = [bp.start, bp.len];
+    let start = bp.start;
+    if (winLo < start) start = winLo;
+    else if (winHi > start + bp.len) start = winHi - bp.len;
+    start = clamp(start, 0, Math.max(0, SLOTS - bp.len));
+    let to = null;
+    if (start !== bp.start) {
+      applyHoursToPerson(bp, start, bp.len, start + (bp.brk - bp.start));
+      to = [bp.start, bp.len];
+    }
     let used = false;
-    lineBars.forEach(b => {
-      if (!away.has(b.owner) || !rot.slots.includes(b.owner)) return;
-      const slotStart = b.start, slotEnd = b.start + b.len;
-      const info = { owner: b.owner, from: [bp.start, bp.len], to: null };
-      let start = bp.start;
-      if (slotStart < start) start = slotStart;
-      else if (slotEnd > start + bp.len) start = slotEnd - bp.len;
-      start = clamp(start, 0, Math.max(0, SLOTS - bp.len));
-      if (start !== bp.start) {
-        const rel = bp.brk - bp.start;
-        applyHoursToPerson(bp, start, bp.len, start + rel);
-        info.to = [bp.start, bp.len];
-      }
-      const from = Math.max(slotStart, bp.start);
-      const to = Math.min(slotEnd, bp.start + bp.len);
-      if (to <= from) return;
+    taken.forEach(b => {
+      const lo = Math.max(b.start, bp.start);
+      const hi = Math.min(b.start + b.len, bp.start + bp.len);
+      if (hi <= lo) return;
+      const owner = b.owner;
       b.owner = bp.name;
-      b.start = from;
-      b.len = to - from;
-      b.backupInfo = info;
+      b.start = lo;
+      b.len = hi - lo;
+      b.backupInfo = { owner, from, to };
       used = true;
     });
     if (used) {
@@ -4651,6 +4665,7 @@
           let why;
           if (!rot.backup) why = "No backup is listed on the sheet.";
           else if (day.away.has(rot.backup)) why = `Backup ${esc(rot.backup)} is off too.`;
+          else if (day.lineBars.some(b => b.backupFail && b.owner === owner)) why = `Backup ${esc(rot.backup)} is already covering another slot, and one shift cannot reach both.`;
           else why = `Backup ${esc(rot.backup)} could not be moved onto that slot.`;
           lines.push(`<div class="late-line"><strong>Support Line ${slotName(i)} owner ${esc(owner)} is off.</strong> ${why}</div>`);
         }
