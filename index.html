@@ -415,6 +415,16 @@
   }
   .daycell.out { opacity: 0.32; }
   .daycell.today { box-shadow: inset 0 0 0 1.5px var(--phase); }
+  .daycell.needs-action, .week-col.needs-action {
+    position: relative;
+    outline: 2px solid var(--gap); outline-offset: -2px;
+    background: color-mix(in srgb, var(--gap) 16%, var(--paper));
+  }
+  .action-badge {
+    position: absolute; top: 8px; right: 10px; z-index: 2;
+    background: var(--gap); color: #fff; border-radius: 999px; padding: 1px 8px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.02em; white-space: nowrap;
+  }
   .daycell.gap { background: var(--gap-bg); border-color: color-mix(in srgb, var(--gap) 45%, transparent); }
   .daycell.thin { background: var(--thin-bg); border-color: color-mix(in srgb, var(--thin) 40%, transparent); }
   .daycell.weekend { box-shadow: inset 0 -2px 0 var(--vip); }
@@ -4135,7 +4145,20 @@
     const peakVip = vip.slice(peakWin.start, peakWin.end);
     const lineSpan = line.slice(lineWin.start, lineWin.end);
     const late = lateStatus(people, away, key);
+    const notes = [];
+    const names = { vip: "VIP", phase1: "Phase 1" };
+    late.missing.forEach(kind => notes.push("Late shift needs a " + names[kind] + " person"));
+    const rot = data.days[key] ? null : lineRotationFor(key);
+    if (rot) {
+      rot.slots.forEach(owner => {
+        if (owner && away.has(owner) && !lineBars.some(b => b.backupInfo && b.backupInfo.owner === owner)) {
+          notes.push("Support Line owner " + owner + " is off with no cover");
+        }
+      });
+    }
     return {
+      actionNeeded: notes.length > 0,
+      actionNote: notes.join(" · "),
       lateMissing: late.missing,
       phase, vip, line, weekend: false, closed: false,
       minPhase: minOf(peakPhase),
@@ -4497,6 +4520,10 @@
     return html + "</div>";
   }
 
+  // A night that still needs a lead to add cover. Nights that have already passed are not flagged.
+  function needsAction(cov, d, today) {
+    return !!(cov && cov.actionNeeded && !isPastNight(d, today));
+  }
   function renderMonth() {
     const y = ui.cursor.getFullYear(), m = ui.cursor.getMonth();
     const first = new Date(y, m, 1);
@@ -4511,7 +4538,8 @@
       const cov = coverageFor(key);
       const hit = dayShowsUnderFilter(key);
       const dim = hasActiveFilter() && !hit;
-      html += `<button type="button" class="daycell ${out ? "out" : ""} ${sameDay(d, today) ? "today" : ""} ${isPastNight(d, today) ? "past" : ""} ${!dim && cov.weekend ? "weekend" : ""} ${dim ? "dim" : toneClass(cov)}" data-open-day="${key}">
+      html += `<button type="button" class="daycell ${needsAction(cov, d, today) ? "needs-action" : ""} ${out ? "out" : ""} ${sameDay(d, today) ? "today" : ""} ${isPastNight(d, today) ? "past" : ""} ${!dim && cov.weekend ? "weekend" : ""} ${dim ? "dim" : toneClass(cov)}" data-open-day="${key}">
+        ${needsAction(cov, d, today) ? `<span class="action-badge" title="${esc(cov.actionNote)}">Lead action</span>` : ""}
         <div class="dnum">${d.getDate()}<span class="dnum-dow">${d.toLocaleDateString(undefined, { weekday: "short" })}</span></div>
         ${dim ? "" : chipsHtml(cov)}
         ${dim ? "" : cellNamesHtml(key)}
@@ -4605,7 +4633,8 @@
         : (day.weekend && !shown.length)
           ? `<div class="weekend-tag">Weekend cover</div><div class="closed-label">Waiting for Actual Cover</div>`
           : weekWhoHtml(day, shown);
-      html += `<article class="card week-col ${sameDay(d, today) ? "today" : ""} ${isPastNight(d, today) ? "past" : ""} ${dim ? "dim" : toneClass(cov)}" data-open-day="${key}">
+      html += `<article class="card week-col ${needsAction(cov, d, today) ? "needs-action" : ""} ${sameDay(d, today) ? "today" : ""} ${isPastNight(d, today) ? "past" : ""} ${dim ? "dim" : toneClass(cov)}" data-open-day="${key}">
+        ${needsAction(cov, d, today) ? `<span class="action-badge" title="${esc(cov.actionNote)}">Lead action</span>` : ""}
         <h3>${DOW[i]} <b>${d.getDate()}</b></h3>
         ${who}
       </article>`;
