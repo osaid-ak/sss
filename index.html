@@ -906,6 +906,10 @@
   // Late shift is 9:30pm–6:30am PKT on the summer schedule (10:30pm–7:30am in standard time).
   const VIP_LATE_START = 13;
   const VIP_LATE_LEN = 18;
+  // Phase 1 / Support Line tab of the same workbook: four-week Support Line rotation plus current shift hours and breaks.
+  const SHEET_PLAN_GID = 274979110;
+  // The three Support Line slots on the summer schedule: 5-9pm, 9pm-12am, 12-3am PKT (6-10, 10-1, 1-4 in standard time).
+  const LINE_SLOTS = [{ start: 4, len: 8 }, { start: 12, len: 6 }, { start: 18, len: 6 }];
   const THEMES = [
     { id: "night", name: "Night", swatch: "#2ee6c5" },
     { id: "frost", name: "Frost", swatch: "#1d5aa6" }
@@ -1163,6 +1167,7 @@
       holidays: [],
       vipPlan: { blocks: [] },
       lateCover: {},
+      sheetPlan: { line: [], hours: {} },
       days: {},
       dst: false
     };
@@ -1368,6 +1373,27 @@
     });
     return out;
   }
+  function sanitizeSheetPlan(raw) {
+    const out = { line: [], hours: {} };
+    const key = /^\d{4}-\d{2}-\d{2}$/;
+    ((raw && raw.line) || []).forEach(b => {
+      if (!b || !key.test(b.start) || !key.test(b.end) || b.end < b.start || !Array.isArray(b.slots)) return;
+      out.line.push({
+        start: b.start,
+        end: b.end,
+        slots: [0, 1, 2].map(i => String(b.slots[i] || "").trim()),
+        backup: String(b.backup || "").trim()
+      });
+    });
+    out.line.sort((a, b) => a.start.localeCompare(b.start));
+    const hours = (raw && raw.hours) || {};
+    Object.keys(hours).forEach(name => {
+      const h = hours[name];
+      if (!h || !Number.isFinite(h.start) || !Number.isFinite(h.len) || h.len < 2) return;
+      out.hours[name] = { start: h.start, len: h.len, brk: Number.isFinite(h.brk) ? h.brk : null };
+    });
+    return out;
+  }
   function sanitizeVipPlan(raw) {
     const src = raw && Array.isArray(raw.blocks) ? raw.blocks : [];
     const key = /^\d{4}-\d{2}-\d{2}$/;
@@ -1440,6 +1466,7 @@
     });
     d.vipPlan = sanitizeVipPlan(raw.vipPlan);
     d.lateCover = sanitizeLateCover(raw.lateCover);
+    d.sheetPlan = sanitizeSheetPlan(raw.sheetPlan);
     d.updatedAt = typeof raw.updatedAt === "string" ? raw.updatedAt : "";
     d.dst = false;
     return d;
@@ -1634,6 +1661,7 @@
       days: mergeDays(base && base.days, remote && remote.days, local && local.days, remoteAt, localAt),
       vipPlan: pickField(base && base.vipPlan, remote && remote.vipPlan, local && local.vipPlan, remoteAt, localAt),
       lateCover: mergeDays(base && base.lateCover, remote && remote.lateCover, local && local.lateCover, remoteAt, localAt),
+      sheetPlan: pickField(base && base.sheetPlan, remote && remote.sheetPlan, local && local.sheetPlan, remoteAt, localAt),
       dst: false,
       slotOrigin: START_MIN
     };
@@ -1737,7 +1765,7 @@
       if (first) {
         applyTeamDoc({ updatedAt: remoteAt, calendar: first });
         setTeamStatus("Live with the team", "ok");
-        setTimeout(() => { pullWeekendCover(false); pullVipPlan(); }, 1500);
+        setTimeout(() => { pullWeekendCover(false); pullVipPlan(); pullSheetPlan(); }, 1500);
         return;
       }
     }
@@ -2168,7 +2196,7 @@
       .finally(() => { weekendSync.busy = false; });
   }
   function startWeekendAutoSync() {
-    const pullAll = () => { pullWeekendCover(false); pullVipPlan(); };
+    const pullAll = () => { pullWeekendCover(false); pullVipPlan(); pullSheetPlan(); };
     pullAll();
     if (weekendSync.timer) clearInterval(weekendSync.timer);
     weekendSync.timer = setInterval(() => {
@@ -2280,7 +2308,7 @@
       (embedded ? "&rm=minimal" : "") + "#gid=" + WEEKEND_SHEET_GID;
   }
   function pullSheets() {
-    return Promise.all([pullWeekendCover(false), pullVipPlan()]);
+    return Promise.all([pullWeekendCover(false), pullVipPlan(), pullSheetPlan()]);
   }
   function closeSheetPanel() {
     if (!sheetPanel.open) return;
@@ -2309,6 +2337,102 @@
     sheetPanel.timer = setInterval(() => {
       if (document.visibilityState === "visible") pullSheets();
     }, 20000);
+  }
+
+  const planSync = { busy: false, last: "", error: "" };
+  function sheetBoardMin(t) { return t < START_MIN ? t + 24 * 60 : t; }
+  function sheetClock(h, m, ap) {
+    let hr = Number(h) % 12;
+    if (/p/i.test(ap)) hr += 12;
+    return hr * 60 + Number(m || 0);
+  }
+  function parseSheetShift(text) {
+    const m = String(text || "").match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)\s*[-–—]\s*(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/i);
+    if (!m) return null;
+    const a = sheetClock(m[1], m[2], m[3]);
+    const b = sheetClock(m[4], m[5], m[6]);
+    return { startMin: sheetBoardMin(a), len: ((b - a + 24 * 60) % (24 * 60)) / SLOT_MIN };
+  }
+  function parseSheetBreak(text, startMin, lenSlots) {
+    const m = String(text || "").match(/^\s*(\d{1,2})(?::(\d{2}))?\s*[-–—]/);
+    if (!m) return null;
+    const endMin = startMin + lenSlots * SLOT_MIN;
+    const base = (Number(m[1]) % 12) * 60 + Number(m[2] || 0);
+    for (const c of [base, base + 12 * 60]) {
+      const t = sheetBoardMin(c % (24 * 60));
+      if (t >= startMin && t < endMin) return t;
+    }
+    return null;
+  }
+  function parseSheetPlanRows(rows) {
+    const known = new Set(data.people.map(p => p.name.toLowerCase()));
+    const isName = c => known.has(String(c || "").trim().toLowerCase());
+    const hasHours = r => (r || []).some(c => /(AM|PM)/i.test(c) || /late/i.test(c));
+    const namesAt = rows.findIndex((r, i) => r.filter((c, j) => j > 0 && isName(c)).length >= 2 && hasHours(rows[i + 1]));
+    // Slots are in the clock of today's season. The calendar stores the summer schedule, so take the standard-time hour back off.
+    const off = dstSlots(dateKey(nightAnchor(new Date())));
+    const hours = {};
+    if (namesAt >= 0) {
+      rows[namesAt].forEach((cell, j) => {
+        if (j === 0 || !isName(cell)) return;
+        const name = matchRosterName(cell);
+        const original = (rows[namesAt + 1] || [])[j];
+        const current = (rows[namesAt + 2] || [])[j] || original;
+        const breakText = (rows[namesAt + 3] || [])[j];
+        let startMin, len;
+        if (/late/i.test(current || "")) {
+          startMin = START_MIN + (VIP_LATE_START + off) * SLOT_MIN;
+          len = VIP_LATE_LEN;
+        } else {
+          const sh = parseSheetShift(current);
+          if (!sh) return;
+          startMin = sh.startMin;
+          len = sh.len;
+        }
+        const start = Math.round((startMin - START_MIN) / SLOT_MIN) - off;
+        const bt = parseSheetBreak(breakText, startMin, len);
+        const brk = bt == null ? null : Math.round((bt - START_MIN) / SLOT_MIN) - off;
+        if (start < 0 || start + len > SLOTS) return;
+        hours[name] = { start, len, brk };
+      });
+    }
+    let backupAt = -1;
+    rows.forEach(r => r.forEach((c, j) => { if (backupAt < 0 && /^\s*BACKUP\s*$/i.test(c || "")) backupAt = j; }));
+    const line = [];
+    rows.forEach(r => {
+      if (!/^\s*\d+\s*$/.test(r[0] || "")) return;
+      const dates = [r[1], r[2]].map(vipParseDate);
+      if (!dates[0] || !dates[1]) return;
+      const bk = backupAt >= 0 ? backupAt : 6;
+      line.push({
+        start: dates[0],
+        end: dates[1],
+        slots: [bk - 3, bk - 2, bk - 1].map(j => matchRosterName(weekendCell(r, j))),
+        backup: matchRosterName(weekendCell(r, bk))
+      });
+    });
+    return { line, hours };
+  }
+  function pullSheetPlan() {
+    if (planSync.busy) return Promise.resolve(0);
+    planSync.busy = true;
+    return fetchGvizRows(SHEET_PLAN_GID)
+      .then(rows => {
+        const next = sanitizeSheetPlan(parseSheetPlanRows(rows));
+        if (!next.line.length && !Object.keys(next.hours).length) throw new Error("Nothing readable was found on the Phase 1 / Support Line tab.");
+        planSync.last = new Date().toISOString();
+        planSync.error = "";
+        if (sameJson(next, sanitizeSheetPlan(data.sheetPlan))) return 0;
+        data.sheetPlan = next;
+        persistQuiet();
+        render();
+        return 1;
+      })
+      .catch(err => {
+        planSync.error = err && err.message ? err.message : "Could not sync the Phase 1 / Support Line tab.";
+        return 0;
+      })
+      .finally(() => { planSync.busy = false; });
   }
 
   function approvedLeaves() {
@@ -3751,6 +3875,32 @@
       }
     });
   }
+  function lineRotationFor(key) {
+    const blocks = (data.sheetPlan && data.sheetPlan.line) || [];
+    return blocks.find(b => b.start <= key && key <= b.end) || null;
+  }
+  // Shift hours, breaks and the Support Line rotation come from the Phase 1 / Support Line tab.
+  // Everything here is in the summer (base) frame, before the standard-time hour is added.
+  function applySheetPlan(people, lineBars, key) {
+    const sp = data.sheetPlan || {};
+    Object.keys(sp.hours || {}).forEach(name => {
+      const h = sp.hours[name];
+      const p = people.find(x => x.name === name);
+      if (!p) return;
+      applyHoursToPerson(p, h.start, h.len, Number.isFinite(h.brk) ? h.brk : null);
+    });
+    const rot = lineRotationFor(key);
+    if (!rot) return;
+    const bars = [];
+    rot.slots.forEach((owner, i) => {
+      const p = owner && people.find(x => x.name === owner);
+      if (!p || !LINE_SLOTS[i]) return;
+      bars.push({ owner, start: LINE_SLOTS[i].start, len: LINE_SLOTS[i].len });
+      p.roles = Object.assign({}, rolesOf(p), { line: true });
+      syncPersonDerived(p);
+    });
+    lineBars.splice(0, lineBars.length, ...bars);
+  }
   function lateStartFor(key) { return VIP_LATE_START + dstSlots(key); }
   function lateCoverFor(key) { return (data.lateCover && data.lateCover[key]) || null; }
   function applyLateCover(people, key) {
@@ -3823,6 +3973,7 @@
     const people = clone(src ? src.people : data.people);
     const lineBars = clone(src ? src.lineBars : data.lineBars);
     if (!src) {
+      applySheetPlan(people, lineBars, key);
       const off = dstSlots(key);
       if (off) {
         people.forEach(p => shiftPersonClock(p, off));
@@ -4438,6 +4589,16 @@
         if (!cover[kind]) return;
         lines.push(`<div class="late-line"><span class="late-ok">Late cover for ${kindName[kind]}: <b>${esc(cover[kind])}</b></span>` +
           `<button type="button" class="ghost" data-late-remove="${kind}">Remove</button></div>`);
+      });
+    }
+    const rot = lineRotationFor(key);
+    if (rot) {
+      const slotName = i => slotLabel(LINE_SLOTS[i].start + dstSlots(key)) + "–" + slotLabel(LINE_SLOTS[i].start + LINE_SLOTS[i].len + dstSlots(key));
+      rot.slots.forEach((owner, i) => {
+        if (!owner || !day.away.has(owner)) return;
+        const backupOk = rot.backup && !day.away.has(rot.backup);
+        lines.push(`<div class="late-line"><strong>Support Line ${slotName(i)} owner ${esc(owner)} is off.</strong> ` +
+          (rot.backup ? (backupOk ? `Backup: <b>${esc(rot.backup)}</b>.` : `Backup ${esc(rot.backup)} is off too.`) : "No backup listed on the sheet.") + `</div>`);
       });
     }
     if (!lines.length) return "";
@@ -6482,7 +6643,7 @@
     exportCurrentView();
   });
   document.getElementById("syncWeekendBtn").addEventListener("click", () => {
-    Promise.all([pullWeekendCover(true), pullVipPlan()]).then(([changed, vipChanged]) => {
+    Promise.all([pullWeekendCover(true), pullVipPlan(), pullSheetPlan()]).then(([changed, vipChanged, planChanged]) => {
       const lines = [];
       if (!(weekendSync.error && !weekendSync.last)) {
         lines.push(changed
@@ -6492,6 +6653,9 @@
       lines.push(vipSync.error
         ? "VIP Coverage Plan: " + vipSync.error
         : vipChanged ? "Updated the VIP late shift and Phase 1 blocks from Actual Cover." : "VIP late shift and Phase 1 blocks already match Actual Cover.");
+      lines.push(planSync.error
+        ? "Phase 1 / Support Line tab: " + planSync.error
+        : planChanged ? "Updated shift hours, breaks and the Support Line rotation from the sheet." : "Shift hours, breaks and the Support Line rotation already match the sheet.");
       alert(lines.join("\n"));
     });
   });
