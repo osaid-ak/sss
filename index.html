@@ -4304,6 +4304,14 @@
     ui.view = v;
     document.querySelectorAll("#viewTabs button").forEach(b => b.classList.toggle("on", b.dataset.view === v));
     render();
+    scrollToToday();
+  }
+  // Month view opens on the current day instead of the top of the page.
+  function scrollToToday() {
+    if (ui.view !== "month") return;
+    const el = document.querySelector("#main .daycell.today");
+    if (el) el.scrollIntoView({ block: "center" });
+    else window.scrollTo(0, 0);
   }
   function backViewLabel() {
     if (ui.fromView === "year") return "Year";
@@ -4324,6 +4332,7 @@
       if (!ui.showClosed && isClosedDay(ui.cursor)) ui.cursor = addDays(ui.cursor, dir);
     }
     render();
+    scrollToToday();
   }
 
   function navParts() {
