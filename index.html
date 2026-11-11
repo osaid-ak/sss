@@ -4694,7 +4694,7 @@
       html += `<div class="who-time"><span>${esc(slotLabel(start))}</span><span>${on}</span></div>`;
       for (; i < j; i++) {
         const off = day.away.has(bars[i].owner);
-        html += `<div class="who-person ${off ? "off" : "q-line"}"><button type="button" data-filter-name="${esc(bars[i].owner)}">${esc(bars[i].owner)}</button></div>`;
+        html += `<div class="who-person ${off ? "off" : "q-line"}"><button type="button" data-filter-name="${esc(bars[i].owner)}">${esc(bars[i].owner)}${bars[i].backupInfo ? " (backup)" : ""}</button></div>`;
       }
     }
     return html + "</div>";
@@ -5269,7 +5269,8 @@
       bar.dataset.hidx = bi;
       bar.style.left = (LABEL_W + b.start * colW) + "px";
       bar.style.width = (b.len * colW) + "px";
-      bar.textContent = "Line " + slotLabel(b.start) + "–" + slotLabel(b.start + b.len);
+      bar.textContent = "Line " + slotLabel(b.start) + "–" + slotLabel(b.start + b.len) + (b.backupInfo ? " (backup)" : "");
+      if (b.backupInfo) bar.title = p.name + " (backup) is covering " + b.backupInfo.owner + "'s Support Line slot.";
       if (b.start < p.start || b.start + b.len > p.start + p.len) {
         bar.style.boxShadow = "0 0 0 2px var(--gap)";
         bar.title = p.name + "'s Support Line duty runs outside their shift (" + slotLabel(p.start) + "–" + slotLabel(p.start + p.len) + "). That time is not counted as line cover.";
