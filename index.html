@@ -1383,7 +1383,8 @@
       const entry = {};
       if (v.vip && String(v.vip).trim()) entry.vip = String(v.vip).trim();
       if (v.phase1 && String(v.phase1).trim()) entry.phase1 = String(v.phase1).trim();
-      if (entry.vip || entry.phase1) out[key] = entry;
+      if (v.p1q && String(v.p1q).trim()) entry.p1q = String(v.p1q).trim();
+      if (entry.vip || entry.phase1 || entry.p1q) out[key] = entry;
     });
     return out;
   }
@@ -3969,6 +3970,11 @@
   function applyLateCover(people, key) {
     const cov = lateCoverFor(key);
     if (!cov) return;
+    const q = cov.p1q && people.find(x => x.name === cov.p1q);
+    if (q) {
+      q.roles = Object.assign({}, rolesOf(q), { phase1: true, vip: false });
+      syncPersonDerived(q);
+    }
     const start = lateStartFor(key);
     [["vip", cov.vip], ["phase1", cov.phase1]].forEach(([kind, name]) => {
       const p = name && people.find(x => x.name === name);
@@ -3979,6 +3985,14 @@
       p.roles = Object.assign({}, rolesOf(p), kind === "vip" ? { vip: true, phase1: false } : { phase1: true, vip: false });
       syncPersonDerived(p);
     });
+  }
+  // Phase 1 queue cover is separate from the late shift: the sheet's Phase 1 person is off, so a VIP rep moves to Phase 1 on their own hours.
+  function phaseQueueNeed(away, key) {
+    if (data.days[key]) return null;
+    const blk = vipBlockFor(key);
+    if (!blk || !blk.phase1 || !away || !away.has(blk.phase1)) return null;
+    const cov = lateCoverFor(key) || {};
+    return cov.p1q ? null : blk.phase1;
   }
   // Every weekday late shift needs one VIP and one Phase 1 person who is actually working.
   function lateStatus(people, away, key) {
@@ -3991,16 +4005,10 @@
       if (r.vip) vip.push(p.name);
       if (r.phase1) phase1.push(p.name);
     });
-    // The sheet's block names who should be on the late shift. If that person is off, cover is needed until a lead adds one.
-    const blk = vipBlockFor(key) || {};
-    const cov = lateCoverFor(key) || {};
-    const blockOff = {};
-    if (blk.late && away && away.has(blk.late)) blockOff.vip = blk.late;
-    if (blk.phase1 && away && away.has(blk.phase1)) blockOff.phase1 = blk.phase1;
     const missing = [];
-    if (!vip.length || (blockOff.vip && !cov.vip)) missing.push("vip");
-    if (!phase1.length || (blockOff.phase1 && !cov.phase1)) missing.push("phase1");
-    return { start, vip, phase1, absent, missing, blockOff };
+    if (!vip.length) missing.push("vip");
+    if (!phase1.length) missing.push("phase1");
+    return { start, vip, phase1, absent, missing };
   }
   function resolveDay(key, previewPlan) {
     if (isClosedDay(key)) {
@@ -4153,7 +4161,9 @@
     const late = lateStatus(people, away, key);
     const notes = [];
     const names = { vip: "VIP", phase1: "Phase 1" };
-    late.missing.forEach(kind => notes.push(late.blockOff[kind] ? names[kind] + " late shift: " + late.blockOff[kind] + " is off, needs cover" : "Late shift needs a " + names[kind] + " person"));
+    late.missing.forEach(kind => notes.push("Late shift needs a " + names[kind] + " person"));
+    const pq = phaseQueueNeed(away, key);
+    if (pq) notes.push("Phase 1 needs cover: " + pq + " is off");
     const rot = data.days[key] ? null : lineRotationFor(key);
     if (rot) {
       rot.slots.forEach(owner => {
@@ -4671,10 +4681,7 @@
     const kindName = { vip: "VIP", phase1: "Phase 1" };
     const lines = [];
     st.missing.forEach(kind => {
-      const off1 = st.blockOff[kind];
-      const who = off1
-        ? ` ${esc(off1)} is off.` + (kind === "phase1" ? " Add a VIP rep to Phase 1 to cover." : "")
-        : (st.absent.length ? " " + st.absent.map(esc).join(", ") + (st.absent.length === 1 ? " is" : " are") + " off." : "");
+      const who = st.absent.length ? " " + st.absent.map(esc).join(", ") + (st.absent.length === 1 ? " is" : " are") + " off." : "";
       let control;
       if (ui.leadAccess) {
         const taken = new Set([cover.vip, cover.phase1].filter(Boolean));
@@ -4692,7 +4699,23 @@
       }
       lines.push(`<div class="late-line"><strong>Late shift ${range} needs a ${kindName[kind]} person.</strong>${who} ${control}</div>`);
     });
+    const pqOff = phaseQueueNeed(day.away, key);
+    if (pqOff) {
+      let control;
+      if (ui.leadAccess) {
+        const opts = day.people
+          .filter(p => !day.away.has(p.name) && !rolesOf(p).lead && p.name !== cover.p1q)
+          .sort((a, b) => (rolesOf(a).vip ? 0 : 1) - (rolesOf(b).vip ? 0 : 1) || a.name.localeCompare(b.name))
+          .map(p => `<option value="${esc(p.name)}">${esc(p.name)} · ${slotLabel(p.start)}–${slotLabel(p.start + p.len)}</option>`).join("");
+        control = `<select data-late-pick="p1q" aria-label="Add Phase 1 cover"><option value="">Choose cover</option>${opts}</select>` +
+          `<button type="button" class="primary" data-late-add="p1q">Add cover</button>`;
+      } else {
+        control = `<span class="late-ok">A lead can add cover from Access.</span>`;
+      }
+      lines.push(`<div class="late-line"><strong>Phase 1 needs cover.</strong> ${esc(pqOff)} is off. Add a VIP rep to Phase 1. ${control}</div>`);
+    }
     if (ui.leadAccess) {
+      if (cover.p1q) lines.push(`<div class="late-line"><span class="late-ok">Phase 1 cover (from VIP): <b>${esc(cover.p1q)}</b></span><button type="button" class="ghost" data-late-remove="p1q">Remove</button></div>`);
       ["vip", "phase1"].forEach(kind => {
         if (!cover[kind]) return;
         lines.push(`<div class="late-line"><span class="late-ok">Late cover for ${kindName[kind]}: <b>${esc(cover[kind])}</b></span>` +
@@ -4801,7 +4824,7 @@
         const key = dateKey(ui.cursor);
         if (!data.lateCover || !data.lateCover[key]) return;
         delete data.lateCover[key][btn.dataset.lateRemove];
-        if (!data.lateCover[key].vip && !data.lateCover[key].phase1) delete data.lateCover[key];
+        if (!data.lateCover[key].vip && !data.lateCover[key].phase1 && !data.lateCover[key].p1q) delete data.lateCover[key];
         persist();
         render();
       });
