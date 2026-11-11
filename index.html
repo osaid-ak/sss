@@ -4627,7 +4627,7 @@
       if (ui.leadAccess) {
         const taken = new Set([cover.vip, cover.phase1].filter(Boolean));
         const options = day.people
-          .filter(p => !day.away.has(p.name) && p.start < st.start && !taken.has(p.name))
+          .filter(p => !day.away.has(p.name) && p.start < st.start && !taken.has(p.name) && !rolesOf(p).lead)
           .sort((a, b) => {
             const same = x => (kind === "vip" ? rolesOf(x).vip : rolesOf(x).phase1) ? 0 : 1;
             return same(a) - same(b) || a.name.localeCompare(b.name);
