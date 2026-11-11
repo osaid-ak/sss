@@ -3922,8 +3922,8 @@
       const p = name && base.find(x => x.name === name);
       if (!p) return;
       const a = ANCHORS.find(x => x.start === p.start && x.len === p.len);
-      // Someone else on the same anchor shift still holds it.
-      const held = base.some(x => x.name !== blk.late && x.name !== blk.phase1 && !rolesOf(x).lead && x.start === p.start && x.len === p.len);
+      // Anchor shifts are VIP seats: another VIP rep on the same shift still holds it. Phase 1 reps on those hours do not.
+      const held = base.some(x => x.name !== blk.late && x.name !== blk.phase1 && !rolesOf(x).lead && rolesOf(x).vip && x.start === p.start && x.len === p.len);
       if (a && !held) gaps.push({ kind, person: name, start: a.start + off, len: a.len, brk: p.brk - p.start, block: blk.start });
     });
     return gaps;
