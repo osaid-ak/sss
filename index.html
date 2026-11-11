@@ -3901,6 +3901,29 @@
     });
     lineBars.splice(0, lineBars.length, ...bars);
   }
+  // When the owner of a Support Line slot is off, the sheet's backup takes that slot, for the hours the backup is working.
+  function applyLineBackup(people, lineBars, away, key) {
+    const rot = lineRotationFor(key);
+    if (!rot || !rot.backup) return;
+    const bp = people.find(x => x.name === rot.backup);
+    if (!bp || away.has(bp.name)) return;
+    let used = false;
+    lineBars.forEach(b => {
+      if (!away.has(b.owner) || !rot.slots.includes(b.owner)) return;
+      const start = Math.max(b.start, bp.start);
+      const end = Math.min(b.start + b.len, bp.start + bp.len);
+      if (end <= start) return;
+      b.owner = bp.name;
+      b.start = start;
+      b.len = end - start;
+      b.backup = true;
+      used = true;
+    });
+    if (used) {
+      bp.roles = Object.assign({}, rolesOf(bp), { line: true });
+      syncPersonDerived(bp);
+    }
+  }
   function lateStartFor(key) { return VIP_LATE_START + dstSlots(key); }
   function lateCoverFor(key) { return (data.lateCover && data.lateCover[key]) || null; }
   function applyLateCover(people, key) {
@@ -3989,15 +4012,17 @@
         if (p) applyHoursToPerson(p, h.start, h.end - h.start, clamp(p.brk, h.start, Math.max(h.start, h.end - 2)));
       });
     }
+    const awaySet = new Set(people.filter(p => {
+      if (isHolidayAway(p.name, key, previewPlan)) return true;
+      return onLeave(p.name, key);
+    }).map(p => p.name));
+    if (!src) applyLineBackup(people, lineBars, awaySet, key);
     return {
       people,
       lineBars,
       closed: false,
       weekend: false,
-      away: new Set(people.filter(p => {
-        if (isHolidayAway(p.name, key, previewPlan)) return true;
-        return onLeave(p.name, key);
-      }).map(p => p.name))
+      away: awaySet
     };
   }
 
@@ -4596,9 +4621,15 @@
       const slotName = i => slotLabel(LINE_SLOTS[i].start + dstSlots(key)) + "–" + slotLabel(LINE_SLOTS[i].start + LINE_SLOTS[i].len + dstSlots(key));
       rot.slots.forEach((owner, i) => {
         if (!owner || !day.away.has(owner)) return;
-        const backupOk = rot.backup && !day.away.has(rot.backup);
-        lines.push(`<div class="late-line"><strong>Support Line ${slotName(i)} owner ${esc(owner)} is off.</strong> ` +
-          (rot.backup ? (backupOk ? `Backup: <b>${esc(rot.backup)}</b>.` : `Backup ${esc(rot.backup)} is off too.`) : "No backup listed on the sheet.") + `</div>`);
+        const bar = day.lineBars.find(b => b.backup && b.owner === rot.backup &&
+          b.start < LINE_SLOTS[i].start + LINE_SLOTS[i].len + dstSlots(key) && b.start + b.len > LINE_SLOTS[i].start + dstSlots(key));
+        let msg;
+        if (!rot.backup) msg = "No backup is listed on the sheet.";
+        else if (day.away.has(rot.backup)) msg = `Backup ${esc(rot.backup)} is off too.`;
+        else if (bar) msg = `Backup <b>${esc(rot.backup)}</b> is covering ${slotLabel(bar.start)}–${slotLabel(bar.start + bar.len)}` +
+          (bar.len < LINE_SLOTS[i].len ? ` (their shift does not cover the whole slot).` : ".");
+        else msg = `Backup ${esc(rot.backup)} is not working during that slot.`;
+        lines.push(`<div class="late-line"><strong>Support Line ${slotName(i)} owner ${esc(owner)} is off.</strong> ${msg}</div>`);
       });
     }
     if (!lines.length) return "";
