@@ -51,6 +51,8 @@ The Phase 1 / Support Line tab (gid 274979110, same workbook) is treated as alwa
 - DST is automatic and follows US Eastern time, because shifts are anchored to ET. Stored clocks are the summer (EDT) schedule. From the first Sunday of November to the second Sunday of March, every date shows its shifts, breaks, splits, line assignments and Saturday windows one hour later in PKT, and the Peak window (7pm–12am becomes 8pm–1am) and Support Line window (5pm–3am becomes 6pm–4am) move with them. The board itself stays 3pm–8am PKT. There is no DST button, and `dst` in saved data is always false. Older plans saved with the global switch on are converted back to the summer schedule on load. Per-day edits are stored as shown for that day. Do not reintroduce a manual switch unless asked.
 - The lead PIN is in the page source. Do not print it in chat or in the UI.
 
+- Calendar text (month, week, day and timeline) is one pixel larger than the original sizes, with the same layout. Keep that scale when adding new text.
+
 ## Already in place
 
 Team sync, weekend sync from the sheet, role colors for night and frost, week time chips, Support Line section, Off/PTO filter, OOO styling, PKT-first roster times, peak and Support Line windows that follow DST, and Year behind lead access.
