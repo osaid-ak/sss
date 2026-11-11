@@ -4229,7 +4229,7 @@
     const names = { vip: "VIP", phase1: "Phase 1" };
     late.missing.forEach(kind => notes.push("Late shift needs a " + names[kind] + " person"));
     anchorGaps(key).forEach(g => {
-      if (!anchorCoverFor(g.block)[g.kind]) notes.push("Anchor shift " + anchorLabel(g) + " is uncovered");
+      if (!anchorCoverFor(g.block)[g.kind]) notes.push("Anchor shift " + anchorLabel(g) + " VIP is uncovered");
     });
     const pq = phaseQueueNeed(away, key);
     if (pq) notes.push("Phase 1 needs cover: " + pq + " is off");
@@ -4776,7 +4776,7 @@
       const chosen = anchorCoverFor(g.block)[g.kind];
       const role = g.kind === "late" ? "Late Shift" : "Phase 1";
       if (chosen) {
-        lines.push(`<div class="late-line"><span class="late-ok">Anchor shift ${anchorLabel(g)} (${esc(g.person)} is on ${role} this block): covered by <b>${esc(chosen)}</b></span>` +
+        lines.push(`<div class="late-line"><span class="late-ok">Anchor shift ${anchorLabel(g)} VIP (${esc(g.person)} is on ${role} this block): covered by <b>${esc(chosen)}</b></span>` +
           (ui.leadAccess ? `<button type="button" class="ghost" data-anchor-remove="${g.kind}">Remove</button>` : "") + `</div>`);
         return;
       }
@@ -4793,7 +4793,7 @@
       } else {
         control = `<span class="late-ok">A lead can add cover from Access.</span>`;
       }
-      lines.push(`<div class="late-line"><strong>Anchor shift ${anchorLabel(g)} is uncovered.</strong> ${esc(g.person)} is on ${role} this block. Add a VIP rep to hold it. ${control}</div>`);
+      lines.push(`<div class="late-line"><strong>Anchor shift ${anchorLabel(g)} VIP is uncovered.</strong> ${esc(g.person)} is on ${role} this block. Add a VIP rep to work this shift. ${control}</div>`);
     });
     const pqOff = phaseQueueNeed(day.away, key);
     if (pqOff) {
