@@ -4748,6 +4748,11 @@
     }
     return true;
   }
+  // Cover pickers only offer reps who normally work that queue (roster roles, before any block changes).
+  function baseRole(name, kind) {
+    const b = data.people.find(x => x.name === name);
+    return !!(b && rolesOf(b)[kind]);
+  }
   function lateAlertHtml(key) {
     if (isClosedDay(key) || isSaturday(key)) return "";
     const day = resolveDay(key);
@@ -4762,11 +4767,8 @@
       if (ui.leadAccess) {
         const taken = new Set([cover.vip, cover.phase1].filter(Boolean));
         const options = day.people
-          .filter(p => !day.away.has(p.name) && p.start < st.start && !taken.has(p.name) && !rolesOf(p).lead)
-          .sort((a, b) => {
-            const same = x => (kind === "vip" ? rolesOf(x).vip : rolesOf(x).phase1) ? 0 : 1;
-            return same(a) - same(b) || a.name.localeCompare(b.name);
-          })
+          .filter(p => !day.away.has(p.name) && p.start < st.start && !taken.has(p.name) && !rolesOf(p).lead && baseRole(p.name, kind))
+          .sort((a, b) => a.name.localeCompare(b.name))
           .map(p => `<option value="${esc(p.name)}">${esc(p.name)} · ${slotLabel(p.start)}–${slotLabel(p.start + p.len)}</option>`).join("");
         control = `<select data-late-pick="${kind}" aria-label="Add ${kindName[kind]} cover"><option value="">Choose cover</option>${options}</select>` +
           `<button type="button" class="primary" data-late-add="${kind}">Add cover</button>`;
@@ -4788,7 +4790,7 @@
         const cov = anchorCoverFor(g.block);
         const blk = vipBlockFor(key) || {};
         const opts = data.people
-          .filter(p => !rolesOf(p).lead && p.name !== blk.late && p.name !== blk.phase1 && p.name !== cov.late && p.name !== cov.phase1)
+          .filter(p => !rolesOf(p).lead && baseRole(p.name, g.kind === "late" ? "vip" : "phase1") && p.name !== blk.late && p.name !== blk.phase1 && p.name !== cov.late && p.name !== cov.phase1)
           .sort((a, b) => a.name.localeCompare(b.name))
           .map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");
         control = `<select data-anchor-pick="${g.kind}" aria-label="Anchor shift cover"><option value="">Choose cover</option>${opts}</select>` +
@@ -4803,8 +4805,8 @@
       let control;
       if (ui.leadAccess) {
         const opts = day.people
-          .filter(p => !day.away.has(p.name) && !rolesOf(p).lead && p.name !== cover.p1q)
-          .sort((a, b) => (rolesOf(a).vip ? 0 : 1) - (rolesOf(b).vip ? 0 : 1) || a.name.localeCompare(b.name))
+          .filter(p => !day.away.has(p.name) && !rolesOf(p).lead && baseRole(p.name, "vip") && p.name !== cover.p1q)
+          .sort((a, b) => a.name.localeCompare(b.name))
           .map(p => `<option value="${esc(p.name)}">${esc(p.name)} · ${slotLabel(p.start)}–${slotLabel(p.start + p.len)}</option>`).join("");
         control = `<select data-late-pick="p1q" aria-label="Add Phase 1 cover"><option value="">Choose cover</option>${opts}</select>` +
           `<button type="button" class="primary" data-late-add="p1q">Add cover</button>`;
