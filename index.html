@@ -4672,6 +4672,13 @@
     return html + "</div>";
   }
 
+  // True when working people's Support Line bars already span the whole slot (for example after a lead's own edit).
+  function slotCovered(lineBars, away, start, len) {
+    for (let t = start; t < start + len; t++) {
+      if (!lineBars.some(b => !away.has(b.owner) && b.start <= t && t < b.start + b.len)) return false;
+    }
+    return true;
+  }
   function lateAlertHtml(key) {
     if (isClosedDay(key) || isSaturday(key)) return "";
     const day = resolveDay(key);
@@ -4737,6 +4744,9 @@
             ? `${esc(bp)}'s shift was adjusted to ${slotLabel(info.to[0])}–${slotLabel(info.to[0] + info.to[1])} to cover the Support Line.`
             : `${esc(bp)}'s shift already covered it.`;
           infos.push(`<div class="late-line">${esc(owner)} is off. ${esc(bp)} replaced the ${slotName(i)} Support Line slot. ${shift}</div>`);
+        } else if (slotCovered(day.lineBars, day.away, LINE_SLOTS[i].start + off, LINE_SLOTS[i].len)) {
+          const who = [...new Set(day.lineBars.filter(b => !day.away.has(b.owner) && b.start < LINE_SLOTS[i].start + off + LINE_SLOTS[i].len && b.start + b.len > LINE_SLOTS[i].start + off).map(b => b.owner))];
+          infos.push(`<div class="late-line">${esc(owner)} is off. ${who.map(esc).join(", ")} is covering the ${slotName(i)} Support Line slot.</div>`);
         } else {
           let why;
           if (!rot.backup) why = "No backup is listed on the sheet.";
