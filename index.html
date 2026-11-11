@@ -1181,6 +1181,7 @@
       holidays: [],
       vipPlan: { blocks: [] },
       lateCover: {},
+      anchorCover: {},
       sheetPlan: { line: [], hours: {} },
       days: {},
       dst: false
@@ -1388,6 +1389,20 @@
     });
     return out;
   }
+  // Replacements for anchor shifts, one entry per VIP block (keyed by the block's first date).
+  function sanitizeAnchorCover(raw) {
+    const out = {};
+    if (!raw || typeof raw !== "object") return out;
+    Object.keys(raw).forEach(key => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return;
+      const v = raw[key] || {};
+      const entry = {};
+      if (v.late && String(v.late).trim()) entry.late = String(v.late).trim();
+      if (v.phase1 && String(v.phase1).trim()) entry.phase1 = String(v.phase1).trim();
+      if (entry.late || entry.phase1) out[key] = entry;
+    });
+    return out;
+  }
   function sanitizeSheetPlan(raw) {
     const out = { line: [], hours: {} };
     const key = /^\d{4}-\d{2}-\d{2}$/;
@@ -1481,6 +1496,7 @@
     });
     d.vipPlan = sanitizeVipPlan(raw.vipPlan);
     d.lateCover = sanitizeLateCover(raw.lateCover);
+    d.anchorCover = sanitizeAnchorCover(raw.anchorCover);
     d.sheetPlan = sanitizeSheetPlan(raw.sheetPlan);
     d.updatedAt = typeof raw.updatedAt === "string" ? raw.updatedAt : "";
     d.dst = false;
@@ -1676,6 +1692,7 @@
       days: mergeDays(base && base.days, remote && remote.days, local && local.days, remoteAt, localAt),
       vipPlan: pickField(base && base.vipPlan, remote && remote.vipPlan, local && local.vipPlan, remoteAt, localAt),
       lateCover: mergeDays(base && base.lateCover, remote && remote.lateCover, local && local.lateCover, remoteAt, localAt),
+      anchorCover: mergeDays(base && base.anchorCover, remote && remote.anchorCover, local && local.anchorCover, remoteAt, localAt),
       sheetPlan: pickField(base && base.sheetPlan, remote && remote.sheetPlan, local && local.sheetPlan, remoteAt, localAt),
       dst: false,
       slotOrigin: START_MIN
@@ -3890,6 +3907,40 @@
       }
     });
   }
+  // Anchor shifts (summer clocks): 5pm-2am, 6pm-3am, 8pm-5am. Each must always be held by someone.
+  const ANCHORS = [{ start: 4, len: 18 }, { start: 6, len: 18 }, { start: 10, len: 18 }];
+  // When the block's Late Shift or Phase 1 person normally works an anchor shift, that anchor is vacated for the block.
+  function anchorGaps(key) {
+    if (isClosedDay(key) || isSaturday(key) || data.days[key]) return [];
+    const blk = vipBlockFor(key);
+    if (!blk) return [];
+    const base = clone(data.people);
+    applySheetPlan(base, [], key);
+    const off = dstSlots(key);
+    const gaps = [];
+    [["late", blk.late], ["phase1", blk.phase1]].forEach(([kind, name]) => {
+      const p = name && base.find(x => x.name === name);
+      if (!p) return;
+      const a = ANCHORS.find(x => x.start === p.start && x.len === p.len);
+      // Someone else on the same anchor shift still holds it.
+      const held = base.some(x => x.name !== blk.late && x.name !== blk.phase1 && !rolesOf(x).lead && x.start === p.start && x.len === p.len);
+      if (a && !held) gaps.push({ kind, person: name, start: a.start + off, len: a.len, brk: p.brk - p.start, block: blk.start });
+    });
+    return gaps;
+  }
+  function anchorCoverFor(blockStart) { return (data.anchorCover && data.anchorCover[blockStart]) || {}; }
+  function applyAnchorCover(people, key) {
+    anchorGaps(key).forEach(g => {
+      const name = anchorCoverFor(g.block)[g.kind];
+      const p = name && people.find(x => x.name === name);
+      if (!p) return;
+      p.split = null;
+      applyHoursToPerson(p, g.start, g.len, clamp(g.start + g.brk, g.start, g.start + g.len - 2));
+      p.roles = Object.assign({}, rolesOf(p), { vip: true, phase1: false });
+      syncPersonDerived(p);
+    });
+  }
+  function anchorLabel(g) { return slotLabel(g.start) + "–" + slotLabel(g.start + g.len); }
   function lineRotationFor(key) {
     const blocks = (data.sheetPlan && data.sheetPlan.line) || [];
     return blocks.find(b => b.start <= key && key <= b.end) || null;
@@ -4057,6 +4108,7 @@
         lineBars.forEach(b => shiftBarClock(b, off));
       }
       applyVipBlock(people, key);
+      applyAnchorCover(people, key);
     }
     applyLateCover(people, key);
     if (previewPlan && previewPlan.hours && previewPlan.hours[key]) {
@@ -4162,6 +4214,9 @@
     const notes = [];
     const names = { vip: "VIP", phase1: "Phase 1" };
     late.missing.forEach(kind => notes.push("Late shift needs a " + names[kind] + " person"));
+    anchorGaps(key).forEach(g => {
+      if (!anchorCoverFor(g.block)[g.kind]) notes.push("Anchor shift " + anchorLabel(g) + " is uncovered");
+    });
     const pq = phaseQueueNeed(away, key);
     if (pq) notes.push("Phase 1 needs cover: " + pq + " is off");
     const rot = data.days[key] ? null : lineRotationFor(key);
@@ -4706,6 +4761,29 @@
       }
       lines.push(`<div class="late-line"><strong>Late shift ${range} needs a ${kindName[kind]} person.</strong>${who} ${control}</div>`);
     });
+    anchorGaps(key).forEach(g => {
+      const chosen = anchorCoverFor(g.block)[g.kind];
+      const role = g.kind === "late" ? "Late Shift" : "Phase 1";
+      if (chosen) {
+        lines.push(`<div class="late-line"><span class="late-ok">Anchor shift ${anchorLabel(g)} (${esc(g.person)} is on ${role} this block): covered by <b>${esc(chosen)}</b></span>` +
+          (ui.leadAccess ? `<button type="button" class="ghost" data-anchor-remove="${g.kind}">Remove</button>` : "") + `</div>`);
+        return;
+      }
+      let control;
+      if (ui.leadAccess) {
+        const cov = anchorCoverFor(g.block);
+        const blk = vipBlockFor(key) || {};
+        const opts = data.people
+          .filter(p => !rolesOf(p).lead && p.name !== blk.late && p.name !== blk.phase1 && p.name !== cov.late && p.name !== cov.phase1)
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");
+        control = `<select data-anchor-pick="${g.kind}" aria-label="Anchor shift cover"><option value="">Choose cover</option>${opts}</select>` +
+          `<button type="button" class="primary" data-anchor-add="${g.kind}">Add cover</button>`;
+      } else {
+        control = `<span class="late-ok">A lead can add cover from Access.</span>`;
+      }
+      lines.push(`<div class="late-line"><strong>Anchor shift ${anchorLabel(g)} is uncovered.</strong> ${esc(g.person)} is on ${role} this block. ${control}</div>`);
+    });
     const pqOff = phaseQueueNeed(day.away, key);
     if (pqOff) {
       let control;
@@ -4825,6 +4903,28 @@
         const key = dateKey(ui.cursor);
         data.lateCover = data.lateCover || {};
         data.lateCover[key] = Object.assign({}, data.lateCover[key] || {}, { [kind]: sel.value });
+        persist();
+        render();
+      });
+    });
+    document.querySelectorAll("[data-anchor-add]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const kind = btn.dataset.anchorAdd;
+        const sel = document.querySelector('[data-anchor-pick="' + kind + '"]');
+        const blk = vipBlockFor(dateKey(ui.cursor));
+        if (!sel || !sel.value || !blk) return;
+        data.anchorCover = data.anchorCover || {};
+        data.anchorCover[blk.start] = Object.assign({}, data.anchorCover[blk.start] || {}, { [kind]: sel.value });
+        persist();
+        render();
+      });
+    });
+    document.querySelectorAll("[data-anchor-remove]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const blk = vipBlockFor(dateKey(ui.cursor));
+        if (!blk || !data.anchorCover || !data.anchorCover[blk.start]) return;
+        delete data.anchorCover[blk.start][btn.dataset.anchorRemove];
+        if (!data.anchorCover[blk.start].late && !data.anchorCover[blk.start].phase1) delete data.anchorCover[blk.start];
         persist();
         render();
       });
