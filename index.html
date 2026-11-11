@@ -4309,7 +4309,12 @@
   // Month view opens on the current day instead of the top of the page.
   function scrollToToday() {
     if (ui.view !== "month") return;
-    const el = document.querySelector("#main .daycell.today");
+    let el = document.querySelector("#main .daycell.today");
+    if (!el) {
+      // Early Monday the night in progress is Sunday's, which is hidden; use the next open day.
+      const a = nightAnchor(new Date());
+      el = document.querySelector('#main .daycell[data-open-day="' + dateKey(addDays(a, 1)) + '"]');
+    }
     if (el) el.scrollIntoView({ block: "center" });
     else window.scrollTo(0, 0);
   }
@@ -6660,7 +6665,13 @@
   });
   document.getElementById("prevBtn").addEventListener("click", () => shiftCursor(-1));
   document.getElementById("nextBtn").addEventListener("click", () => shiftCursor(1));
-  document.getElementById("todayBtn").addEventListener("click", () => { ui.cursor = nightAnchor(new Date()); render(); });
+  document.getElementById("todayBtn").addEventListener("click", () => {
+    let c = nightAnchor(new Date());
+    if (!ui.showClosed && isClosedDay(c)) c = addDays(c, 1);
+    ui.cursor = c;
+    render();
+    scrollToToday();
+  });
   document.getElementById("closedToggle").addEventListener("click", () => {
     ui.showClosed = !ui.showClosed;
     if (!ui.showClosed && isClosedDay(ui.cursor)) ui.cursor = addDays(ui.cursor, -1);
