@@ -534,6 +534,10 @@
   }
   .late-alert .late-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
   .late-alert select { max-width: 260px; font-size: 12px; padding: 3px 22px 3px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); }
+  .late-info {
+    margin: 0 0 8px; padding: 8px 12px; border-radius: 10px; font-size: 13px;
+    border: 1px solid var(--line); background: var(--paper); color: var(--muted);
+  }
   .late-ok { color: var(--muted); font-size: 12px; }
   .gap-row { position: relative; height: 16px; margin: 0 0 6px 132px; }
   .gap-label { position: absolute; left: -132px; top: 0; width: 124px; font-size: 10px; font-weight: 700; color: var(--muted); line-height: 16px; letter-spacing: 0.06em; text-transform: uppercase; }
@@ -3901,7 +3905,8 @@
     });
     lineBars.splice(0, lineBars.length, ...bars);
   }
-  // When the owner of a Support Line slot is off, the sheet's backup takes that slot, for the hours the backup is working.
+  // When the owner of a Support Line slot is off, the sheet's backup takes that slot.
+  // If the backup's shift does not cover the slot, the whole shift is moved (same length, same break position) so that it does.
   function applyLineBackup(people, lineBars, away, key) {
     const rot = lineRotationFor(key);
     if (!rot || !rot.backup) return;
@@ -3910,13 +3915,24 @@
     let used = false;
     lineBars.forEach(b => {
       if (!away.has(b.owner) || !rot.slots.includes(b.owner)) return;
-      const start = Math.max(b.start, bp.start);
-      const end = Math.min(b.start + b.len, bp.start + bp.len);
-      if (end <= start) return;
+      const slotStart = b.start, slotEnd = b.start + b.len;
+      const info = { owner: b.owner, from: [bp.start, bp.len], to: null };
+      let start = bp.start;
+      if (slotStart < start) start = slotStart;
+      else if (slotEnd > start + bp.len) start = slotEnd - bp.len;
+      start = clamp(start, 0, Math.max(0, SLOTS - bp.len));
+      if (start !== bp.start) {
+        const rel = bp.brk - bp.start;
+        applyHoursToPerson(bp, start, bp.len, start + rel);
+        info.to = [bp.start, bp.len];
+      }
+      const from = Math.max(slotStart, bp.start);
+      const to = Math.min(slotEnd, bp.start + bp.len);
+      if (to <= from) return;
       b.owner = bp.name;
-      b.start = start;
-      b.len = end - start;
-      b.backup = true;
+      b.start = from;
+      b.len = to - from;
+      b.backupInfo = info;
       used = true;
     });
     if (used) {
@@ -4616,24 +4632,32 @@
           `<button type="button" class="ghost" data-late-remove="${kind}">Remove</button></div>`);
       });
     }
+    const infos = [];
     const rot = lineRotationFor(key);
     if (rot) {
-      const slotName = i => slotLabel(LINE_SLOTS[i].start + dstSlots(key)) + "–" + slotLabel(LINE_SLOTS[i].start + LINE_SLOTS[i].len + dstSlots(key));
+      const off = dstSlots(key);
+      const slotName = i => slotLabel(LINE_SLOTS[i].start + off) + "–" + slotLabel(LINE_SLOTS[i].start + LINE_SLOTS[i].len + off);
       rot.slots.forEach((owner, i) => {
         if (!owner || !day.away.has(owner)) return;
-        const bar = day.lineBars.find(b => b.backup && b.owner === rot.backup &&
-          b.start < LINE_SLOTS[i].start + LINE_SLOTS[i].len + dstSlots(key) && b.start + b.len > LINE_SLOTS[i].start + dstSlots(key));
-        let msg;
-        if (!rot.backup) msg = "No backup is listed on the sheet.";
-        else if (day.away.has(rot.backup)) msg = `Backup ${esc(rot.backup)} is off too.`;
-        else if (bar) msg = `Backup <b>${esc(rot.backup)}</b> is covering ${slotLabel(bar.start)}–${slotLabel(bar.start + bar.len)}` +
-          (bar.len < LINE_SLOTS[i].len ? ` (their shift does not cover the whole slot).` : ".");
-        else msg = `Backup ${esc(rot.backup)} is not working during that slot.`;
-        lines.push(`<div class="late-line"><strong>Support Line ${slotName(i)} owner ${esc(owner)} is off.</strong> ${msg}</div>`);
+        const bar = day.lineBars.find(b => b.backupInfo && b.backupInfo.owner === owner);
+        if (bar) {
+          const bp = bar.owner;
+          const info = bar.backupInfo;
+          const shift = info.to
+            ? `${esc(bp)}'s shift was adjusted to ${slotLabel(info.to[0])}–${slotLabel(info.to[0] + info.to[1])} to cover the Support Line.`
+            : `${esc(bp)}'s shift already covered it.`;
+          infos.push(`<div class="late-line">${esc(owner)} is off. ${esc(bp)} replaced the ${slotName(i)} Support Line slot. ${shift}</div>`);
+        } else {
+          let why;
+          if (!rot.backup) why = "No backup is listed on the sheet.";
+          else if (day.away.has(rot.backup)) why = `Backup ${esc(rot.backup)} is off too.`;
+          else why = `Backup ${esc(rot.backup)} could not be moved onto that slot.`;
+          lines.push(`<div class="late-line"><strong>Support Line ${slotName(i)} owner ${esc(owner)} is off.</strong> ${why}</div>`);
+        }
       });
     }
-    if (!lines.length) return "";
-    return `<div class="late-alert" id="lateAlert">${lines.join("")}</div>`;
+    const infoHtml = infos.length ? `<div class="late-info" id="lateInfo">${infos.join("")}</div>` : "";
+    return (lines.length ? `<div class="late-alert" id="lateAlert">${lines.join("")}</div>` : "") + infoHtml;
   }
   function renderDay() {
     const key = dateKey(ui.cursor);
