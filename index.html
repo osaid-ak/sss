@@ -3991,10 +3991,16 @@
       if (r.vip) vip.push(p.name);
       if (r.phase1) phase1.push(p.name);
     });
+    // The sheet's block names who should be on the late shift. If that person is off, cover is needed until a lead adds one.
+    const blk = vipBlockFor(key) || {};
+    const cov = lateCoverFor(key) || {};
+    const blockOff = {};
+    if (blk.late && away && away.has(blk.late)) blockOff.vip = blk.late;
+    if (blk.phase1 && away && away.has(blk.phase1)) blockOff.phase1 = blk.phase1;
     const missing = [];
-    if (!vip.length) missing.push("vip");
-    if (!phase1.length) missing.push("phase1");
-    return { start, vip, phase1, absent, missing };
+    if (!vip.length || (blockOff.vip && !cov.vip)) missing.push("vip");
+    if (!phase1.length || (blockOff.phase1 && !cov.phase1)) missing.push("phase1");
+    return { start, vip, phase1, absent, missing, blockOff };
   }
   function resolveDay(key, previewPlan) {
     if (isClosedDay(key)) {
@@ -4147,7 +4153,7 @@
     const late = lateStatus(people, away, key);
     const notes = [];
     const names = { vip: "VIP", phase1: "Phase 1" };
-    late.missing.forEach(kind => notes.push("Late shift needs a " + names[kind] + " person"));
+    late.missing.forEach(kind => notes.push(late.blockOff[kind] ? names[kind] + " late shift: " + late.blockOff[kind] + " is off, needs cover" : "Late shift needs a " + names[kind] + " person"));
     const rot = data.days[key] ? null : lineRotationFor(key);
     if (rot) {
       rot.slots.forEach(owner => {
@@ -4651,7 +4657,10 @@
     const kindName = { vip: "VIP", phase1: "Phase 1" };
     const lines = [];
     st.missing.forEach(kind => {
-      const who = st.absent.length ? " " + st.absent.map(esc).join(", ") + (st.absent.length === 1 ? " is" : " are") + " off." : "";
+      const off1 = st.blockOff[kind];
+      const who = off1
+        ? ` ${esc(off1)} is off.` + (kind === "phase1" ? " Add a VIP rep to Phase 1 to cover." : "")
+        : (st.absent.length ? " " + st.absent.map(esc).join(", ") + (st.absent.length === 1 ? " is" : " are") + " off." : "");
       let control;
       if (ui.leadAccess) {
         const taken = new Set([cover.vip, cover.phase1].filter(Boolean));
