@@ -278,6 +278,8 @@ async function proxyPlan(request, env, rest) {
   if (request.method === "POST") {
     init.headers["Content-Type"] = "application/json";
     init.body = await request.text();
+    // The whole plan is well under this; the cap stops a runaway or hostile write.
+    if (init.body.length > 2000000) return new Response("Too large", { status: 413, headers: HEADERS });
   }
   const upstream = await fetch(url, init);
   const headers = new Headers(HEADERS);

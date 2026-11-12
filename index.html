@@ -285,10 +285,6 @@
     border-radius: 14px; box-shadow: var(--shadow);
     padding: 8px; z-index: 16;
   }
-  .filter-group-label {
-    font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
-    color: var(--muted); padding: 8px 8px 4px;
-  }
   .filter-menu .person-check {
     display: flex; width: 100%; border-radius: 10px; padding: 7px 10px;
   }
@@ -347,7 +343,6 @@
   }
   .roster-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
   .roster-name { font-weight: 700; min-width: 92px; }
-  .roster-meta { font-size: 11px; color: var(--muted); width: 100%; }
   .roster-row .qswitch button { font-size: 11px; padding: 4px 8px; }
   .hours-scope {
     display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
@@ -495,16 +490,6 @@
   .day-offs { display: flex; flex-wrap: wrap; gap: 2px 8px; margin-top: 2px; }
   .day-offs .who-off { font-size: 12px; }
 
-  .day-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: end; margin-bottom: 12px; }
-  .day-head h2 { margin: 0; font-family: var(--serif); font-size: 28px; letter-spacing: -0.03em; }
-  .day-head p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
-  #backView { margin-bottom: 8px; }
-  .day-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-  .day-stats span {
-    border: 1px solid var(--line); background: var(--paper); border-radius: 999px;
-    padding: 3px 8px; font-size: 12px; color: var(--muted); font-weight: 600;
-  }
-  .day-stats b { color: var(--ink); }
   .planner { --rh: 36px; flex: 1; min-height: 0; padding: 0 28px 10px 16px; overflow: auto; }
   .day-note { margin: 0 0 8px; color: var(--muted); font-size: 14px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
   .planner-inner { position: relative; min-width: 860px; }
@@ -816,7 +801,6 @@
   .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
   .tabs button { border: 1px solid var(--line); background: var(--paper); border-radius: 999px; padding: 4px 10px; font-size: 12px; }
   .tabs button.on { background: var(--chip-on); color: var(--chip-on-ink); border-color: var(--chip-on); }
-  .badge { background: var(--gap); color: #fff; border-radius: 999px; font-size: 10px; padding: 1px 6px; margin-left: 4px; }
   .hidden { display: none !important; }
   .ghost.on { background: var(--chip-on); color: var(--chip-on-ink); border-color: var(--chip-on); }
   .app.sheet-open .workspace, .app.sheet-open .hint { display: none; }
@@ -1003,12 +987,9 @@
   const VIP_WKND_START = 4;
   const VIP_WKND_LEN = 18;
   const OLD_SLOT_ORIGIN = 16 * 60;
-  const QUEUES = ["phase1", "vip", "both"];
-  const GROUPS = ["Leads", "Phase 1", "VIP"];
   const Q_LABEL = { phase1: "Phase 1", vip: "VIP", both: "Both", line: "Support Line", lead: "Lead" };
   const ROLE_KEYS = ["lead", "phase1", "vip", "line"];
   const ROLE_LABEL = { lead: "Lead", phase1: "Phase 1", vip: "VIP", line: "Support Line" };
-  const FILTER_KEY = "coverage-calendar-filters";
   const DEFAULT_ROLE_FILTERS = ["phase1", "vip", "line"];
   const SHOW_CLOSED_KEY = "coverage-calendar-show-closed";
   let Q_COLOR = THEME_Q.night;
@@ -1098,11 +1079,7 @@
   function slotLabelET(s, nightDate) {
     return formatClock(slotInstant(nightDate, s), "America/New_York") + " ET";
   }
-  function nightRangeLabel(d) {
-    const start = slotInstant(d, 0);
-    const end = slotInstant(d, SLOTS);
-    return "3:00pm → 8:00am PKT · " + formatClock(start, "America/New_York") + " → " + formatClock(end, "America/New_York") + " ET";
-  }
+
   function prettyDate(d) {
     return d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
   }
@@ -1382,26 +1359,7 @@
     const len = Number.isFinite(b.len) ? b.len : 0;
     b.start = clamp(b.start + delta, 0, Math.max(0, SLOTS - len));
   }
-  function shiftAllClocks(delta) {
-    if (!delta) return;
-    (data.people || []).forEach(p => shiftPersonClock(p, delta));
-    (data.lineBars || []).forEach(b => shiftBarClock(b, delta));
-    Object.values(data.days || {}).forEach(day => {
-      (day.people || []).forEach(p => shiftPersonClock(p, delta));
-      (day.lineBars || []).forEach(b => shiftBarClock(b, delta));
-    });
-    (data.holidays || []).forEach(plan => {
-      Object.values(plan.hours || {}).forEach(row => {
-        Object.values(row || {}).forEach(span => {
-          if (!span || !Number.isFinite(span.start) || !Number.isFinite(span.end)) return;
-          const len = span.end - span.start;
-          const start = clamp(span.start + delta, 0, Math.max(0, SLOTS - len));
-          span.end = start + len;
-          span.start = start;
-        });
-      });
-    });
-  }
+
   // A lead can name a replacement for a night's late shift: one VIP and one Phase 1 person.
   function sanitizeLateCover(raw) {
     const out = {};
@@ -1565,7 +1523,6 @@
 
   const ui = {
     view: "week",
-    fromView: "week",
     cursor: nightAnchor(new Date()),
     editing: false,
     modal: null,
@@ -1828,7 +1785,7 @@
       if (first) {
         applyTeamDoc({ updatedAt: remoteAt, calendar: first });
         setTeamStatus("Live with the team", "ok");
-        setTimeout(() => { pullWeekendCover(false); pullVipPlan(); pullSheetPlan(); }, 1500);
+        setTimeout(pullSheets, 1500);
         return;
       }
     }
@@ -2076,7 +2033,6 @@
     }
     return null;
   }
-  function weekendParseDate(raw) { return parseAnyDate(raw); }
   function weekendVipNames(first, second) {
     const names = [];
     [first, second].forEach(name => {
@@ -2109,7 +2065,7 @@
     const weekends = [];
     for (let i = cols.headerIndex + 1; i < rows.length; i++) {
       const row = rows[i];
-      const dateKey = weekendParseDate(weekendCell(row, 0));
+      const dateKey = parseAnyDate(weekendCell(row, 0));
       if (!dateKey) continue;
       const plannedP1 = weekendCell(row, cols.plannedAt);
       const plannedVip = [weekendCell(row, cols.plannedAt + 1), weekendCell(row, cols.plannedAt + 2)];
@@ -2254,13 +2210,13 @@
       return payload;
     });
   }
-  function fetchWeekendCoverPayload(force) {
+  function fetchWeekendCoverPayload() {
     const tries = [];
     if (WEEKEND_COVER_API) {
-      tries.push(() => fetchSameOrigin(WEEKEND_COVER_API + (force ? (WEEKEND_COVER_API.indexOf("?") >= 0 ? "&" : "?") + "fresh=1" : "")));
+      tries.push(() => fetchSameOrigin(WEEKEND_COVER_API));
     }
     tries.push(() => fetchGvizJsonp());
-    tries.push(() => fetchSameOrigin("/api/weekend-cover" + (force ? "?fresh=1" : "")));
+    tries.push(() => fetchSameOrigin("/api/weekend-cover"));
     const tryOne = index => {
       if (index >= tries.length) {
         return Promise.reject(new Error("Could not read Weekend Cover from the live sheet."));
@@ -2269,26 +2225,25 @@
     };
     return tryOne(0);
   }
-  function pullWeekendCover(force) {
+  function pullWeekendCover() {
     if (weekendSync.busy) return Promise.resolve(0);
     weekendSync.busy = true;
-    return fetchWeekendCoverPayload(force)
+    return fetchWeekendCoverPayload()
       .then(payload => {
         const changed = applyWeekendCoverDays(payload.weekends || []);
         weekendSync.last = payload.fetchedAt || new Date().toISOString();
         weekendSync.error = payload.error || "";
-        if (changed || force) render();
+        if (changed) render();
         return changed;
       })
       .catch(err => {
         weekendSync.error = err && err.message ? err.message : "Could not sync weekend cover.";
-        if (force) alert(weekendSync.error);
         return 0;
       })
       .finally(() => { weekendSync.busy = false; });
   }
   function startWeekendAutoSync() {
-    const pullAll = () => { pullWeekendCover(false); pullVipPlan(); pullSheetPlan(); };
+    const pullAll = pullSheets;
     pullAll();
     if (weekendSync.timer) clearInterval(weekendSync.timer);
     weekendSync.timer = setInterval(() => {
@@ -2300,7 +2255,6 @@
   }
 
   const vipSync = { busy: false, last: "", error: "" };
-  function vipParseDate(raw) { return parseAnyDate(raw); }
   function parseVipPlanRows(rows) {
     const label = v => weekendHeaderLabel(v);
     const headerIndex = rows.findIndex(row => row.some(c => label(c) === "ACTUAL COVER"));
@@ -2322,7 +2276,7 @@
     const blocks = [];
     for (let i = headerIndex + 2; i < rows.length; i++) {
       const row = rows[i];
-      const dates = row.slice(0, 4).map(vipParseDate).filter(Boolean);
+      const dates = row.slice(0, 4).map(parseAnyDate).filter(Boolean);
       if (dates.length < 2) continue;
       const name = (cols, field) => cols ? weekendCell(row, cols[field]) : "";
       // Actual Cover is the live column. Swap, then Planned, only fill in when Actual is blank.
@@ -2390,7 +2344,7 @@
       (embedded ? "&rm=minimal" : "") + "#gid=" + WEEKEND_SHEET_GID;
   }
   function pullSheets() {
-    return Promise.all([pullWeekendCover(false), pullVipPlan(), pullSheetPlan()]);
+    return Promise.all([pullWeekendCover(), pullVipPlan(), pullSheetPlan()]);
   }
   function closeSheetPanel() {
     if (!sheetPanel.open) return;
@@ -2483,7 +2437,7 @@
     const line = [];
     rows.forEach(r => {
       if (!/^\s*\d+\s*$/.test(r[0] || "")) return;
-      const dates = [r[1], r[2]].map(vipParseDate);
+      const dates = [r[1], r[2]].map(parseAnyDate);
       if (!dates[0] || !dates[1]) return;
       const bk = backupAt >= 0 ? backupAt : 6;
       line.push({
@@ -2535,13 +2489,7 @@
   function leaveCovering(name, key) {
     return approvedLeaves().find(l => l.name === name && l.start <= key && key <= l.end) || null;
   }
-  function pendingCount() {
-    return data.leaves.filter(l => l.status === "pending").length;
-  }
-  function leaveOverlapsMonth(l, ym) {
-    if (!ym) return true;
-    return l.start.slice(0, 7) <= ym && l.end.slice(0, 7) >= ym;
-  }
+
   function keysInRange(start, end) {
     const keys = [];
     if (!start || !end || end < start) return keys;
@@ -3592,9 +3540,7 @@
     return [...ui.queueFilters].some(q => matchesQueue(p, day, q));
   }
   function visiblePeople(day, key) { return day.people.filter(p => personMatches(p, day, key)); }
-  function scheduledUnderFilter(day, key) {
-    return visiblePeople(day, key).filter(p => !day.away.has(p.name));
-  }
+
   function dayShowsUnderFilter(key) {
     if (!hasActiveFilter()) return true;
     if (isClosedDay(key)) return false;
@@ -3666,47 +3612,6 @@
     }
     persist();
     render();
-  }
-  function setQueueFilter(q) {
-    toggleQueueFilter(q);
-  }
-  function setPersonQueue(name, queue) {
-    const key = dateKey(ui.cursor);
-    const day = ensureDay(key);
-    const p = day.people.find(x => x.name === name);
-    if (!p) return;
-    p.queue = queue;
-    persist();
-    render();
-  }
-  function setPersonLine(name, on) {
-    const key = dateKey(ui.cursor);
-    const day = ensureDay(key);
-    const p = day.people.find(x => x.name === name);
-    if (!p) return;
-    if (on) {
-      let best = 0, bestOv = -1;
-      day.lineBars.forEach((b, i) => {
-        const ov = Math.min(p.start + p.len, b.start + b.len) - Math.max(p.start, b.start);
-        if (ov > bestOv) { bestOv = ov; best = i; }
-      });
-      day.lineBars[best].owner = name;
-    } else {
-      const fallback = day.people.find(x => x.name !== name && !day.lineBars.some(b => b.owner === x.name))
-        || day.people.find(x => x.name !== name);
-      day.lineBars.forEach(b => {
-        if (b.owner === name && fallback) b.owner = fallback.name;
-      });
-    }
-    persist();
-    render();
-  }
-  function personSummary(key, name) {
-    const day = resolveDay(key);
-    const p = day.people.find(x => x.name === name);
-    if (!p) return "";
-    if (day.away.has(name)) return name + " off";
-    return name + " · " + hoursLabel(p) + " · " + roleLabels(p);
   }
 
   function rosterOrder() { return data.people.map(p => p.name); }
@@ -4434,8 +4339,6 @@
 
   function setView(v) {
     if (v === "year" && !ui.leadAccess) v = "week";
-    if (v !== "day") ui.fromView = v;
-    else if (ui.view !== "day") ui.fromView = ui.view;
     ui.view = v;
     document.querySelectorAll("#viewTabs button").forEach(b => b.classList.toggle("on", b.dataset.view === v));
     render();
@@ -4452,11 +4355,6 @@
     }
     if (el) el.scrollIntoView({ block: "center" });
     else window.scrollTo(0, 0);
-  }
-  function backViewLabel() {
-    if (ui.fromView === "year") return "Year";
-    if (ui.fromView === "week") return "Week";
-    return "Month";
   }
 
   function visibleDow() {
@@ -4804,11 +4702,25 @@
     }
     return true;
   }
+  // Everyone already used as cover on this night or in this block, so nobody is given two jobs.
+  function committedNames(key) {
+    const c = lateCoverFor(key) || {};
+    const a = anchorCoverFor((vipBlockFor(key) || {}).start);
+    return new Set([c.vip, c.phase1, c.p1q, a.late, a.phase1].filter(Boolean));
+  }
+  function coverPicker(pickAttr, addAttr, kind, label, people, withHours) {
+    const options = people
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(p => `<option value="${esc(p.name)}">${esc(p.name)}${withHours ? " · " + slotLabel(p.start) + "–" + slotLabel(p.start + p.len) : ""}</option>`).join("");
+    return `<select ${pickAttr}="${kind}" aria-label="${label}"><option value="">Choose cover</option>${options}</select>` +
+      `<button type="button" class="primary" ${addAttr}="${kind}">Add cover</button>`;
+  }
   function lateAlertHtml(key) {
     if (isClosedDay(key) || isSaturday(key)) return "";
     const day = resolveDay(key);
     const st = lateStatus(day.people, day.away, key);
     const cover = lateCoverFor(key) || {};
+    const committed = committedNames(key);
     const range = slotLabel(st.start) + "–" + slotLabel(st.start + VIP_LATE_LEN);
     const kindName = { vip: "VIP", phase1: "Phase 1" };
     const lines = [];
@@ -4816,13 +4728,8 @@
       const who = st.absent.length ? " " + st.absent.map(esc).join(", ") + (st.absent.length === 1 ? " is" : " are") + " off." : "";
       let control;
       if (ui.leadAccess) {
-        const taken = new Set([cover.vip, cover.phase1].filter(Boolean));
-        const options = day.people
-          .filter(p => !day.away.has(p.name) && p.start < st.start && !taken.has(p.name) && !rolesOf(p).lead && rolesOf(p)[kind])
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => `<option value="${esc(p.name)}">${esc(p.name)} · ${slotLabel(p.start)}–${slotLabel(p.start + p.len)}</option>`).join("");
-        control = `<select data-late-pick="${kind}" aria-label="Add ${kindName[kind]} cover"><option value="">Choose cover</option>${options}</select>` +
-          `<button type="button" class="primary" data-late-add="${kind}">Add cover</button>`;
+        control = coverPicker("data-late-pick", "data-late-add", kind, "Add " + kindName[kind] + " cover",
+          day.people.filter(p => !day.away.has(p.name) && p.start < st.start && !committed.has(p.name) && !rolesOf(p).lead && rolesOf(p)[kind]), true);
       } else {
         control = `<span class="late-ok">A lead can add cover from Access.</span>`;
       }
@@ -4838,14 +4745,9 @@
       }
       let control;
       if (ui.leadAccess) {
-        const cov = anchorCoverFor(g.block);
         const blk = vipBlockFor(key) || {};
-        const opts = day.people
-          .filter(p => !rolesOf(p).lead && rolesOf(p).vip && p.name !== blk.late && p.name !== blk.phase1 && p.name !== cov.late && p.name !== cov.phase1)
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => `<option value="${esc(p.name)}">${esc(p.name)}</option>`).join("");
-        control = `<select data-anchor-pick="${g.kind}" aria-label="Anchor shift cover"><option value="">Choose cover</option>${opts}</select>` +
-          `<button type="button" class="primary" data-anchor-add="${g.kind}">Add cover</button>`;
+        control = coverPicker("data-anchor-pick", "data-anchor-add", g.kind, "Anchor shift cover",
+          day.people.filter(p => !rolesOf(p).lead && rolesOf(p).vip && p.name !== blk.late && p.name !== blk.phase1 && !committed.has(p.name)), false);
       } else {
         control = `<span class="late-ok">A lead can add cover from Access.</span>`;
       }
@@ -4855,12 +4757,8 @@
     if (pqOff) {
       let control;
       if (ui.leadAccess) {
-        const opts = day.people
-          .filter(p => !day.away.has(p.name) && !rolesOf(p).lead && rolesOf(p).vip && p.name !== cover.p1q)
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .map(p => `<option value="${esc(p.name)}">${esc(p.name)} · ${slotLabel(p.start)}–${slotLabel(p.start + p.len)}</option>`).join("");
-        control = `<select data-late-pick="p1q" aria-label="Add Phase 1 cover"><option value="">Choose cover</option>${opts}</select>` +
-          `<button type="button" class="primary" data-late-add="p1q">Add cover</button>`;
+        control = coverPicker("data-late-pick", "data-late-add", "p1q", "Add Phase 1 cover",
+          day.people.filter(p => !day.away.has(p.name) && !rolesOf(p).lead && rolesOf(p).vip && !committed.has(p.name)), true);
       } else {
         control = `<span class="late-ok">A lead can add cover from Access.</span>`;
       }
@@ -4907,8 +4805,6 @@
   }
   function renderDay() {
     const key = dateKey(ui.cursor);
-    const next = addDays(ui.cursor, 1);
-    const nextName = next.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
     const cov = coverageFor(key);
     if (cov.closed) {
       return `<div class="day-view">
@@ -4946,8 +4842,6 @@
         setView("day");
       });
     });
-    const back = document.getElementById("backView");
-    if (back) back.addEventListener("click", () => setView(ui.fromView || "week"));
     document.querySelectorAll("#main [data-filter-name]").forEach(el => {
       el.addEventListener("click", e => {
         e.stopPropagation();
@@ -5839,16 +5733,7 @@
     fillTeamCounts(arr, people, bars, away, team);
     return arr;
   }
-  function applyMoveCounts(counts, person, hit) {
-    const next = counts.slice();
-    for (let s = 0; s < SLOTS; s++) {
-      const wasOn = mateOnSlot(person, s);
-      const nowOn = s >= hit.start && s < hit.end && !(s >= hit.brk && s < hit.brk + BRK_LEN);
-      if (wasOn && !nowOn) next[s]--;
-      if (!wasOn && nowOn) next[s]++;
-    }
-    return next;
-  }
+
   function followNeedNote(need, team) {
     if (team === "line") {
       const runs = slotRuns(need);
@@ -6973,7 +6858,6 @@
   function snapshotUiState() {
     return {
       view: ui.view,
-      fromView: ui.fromView || ui.view,
       cursor: dateKey(ui.cursor),
       editing: !!ui.editing,
       modal: ui.modal && ui.modal !== "pin" ? ui.modal : null,
@@ -6995,7 +6879,6 @@
     if (!s || typeof s !== "object") return;
     const views = ["year", "month", "week", "day"];
     if (views.indexOf(s.view) >= 0) ui.view = s.view;
-    if (views.indexOf(s.fromView) >= 0) ui.fromView = s.fromView;
     if (typeof s.cursor === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s.cursor)) ui.cursor = parseKey(s.cursor);
     ui.editing = !!s.editing;
     if (typeof s.holidayId === "string") ui.holidayId = s.holidayId;

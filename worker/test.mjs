@@ -139,6 +139,8 @@ check("member cannot read the log", (await get("/api/log", bob.session)).status 
 await get("/auth/logout", ann.session);
 check("sign-out is logged", (await (await get("/api/log", boss.session)).json()).log.some(e => e.event === "sign-out" && e.email === "ann@example.com"));
 
+check("an oversized plan write is refused", (await worker.fetch(new Request(ORIGIN + "/api/team/plan", { method: "POST", headers: { Cookie: bob.session, "Content-Type": "application/json" }, body: "x".repeat(2000001) }), env)).status === 413);
+
 // 6. removing someone locks them out at once
 const saved = env.ALLOWED_EMAILS;
 env.ALLOWED_EMAILS = "ann@example.com";
