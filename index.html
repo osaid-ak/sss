@@ -54,32 +54,32 @@
   }
   html[data-theme="frost"] {
     --ink: #0f2744;
-    --muted: #4d6b86;
-    --faint: #7f98ae;
+    --muted: #4a6781;
+    --faint: #556574;
     --line: #c9dcea;
     --line-soft: #e3eef6;
     --paper: #f7fbfe;
     --canvas: #e4eef6;
     --rail: #d7e6f1;
-    --phase: #15803d;
+    --phase: #137437;
     --phase-soft: rgba(21, 128, 61, 0.12);
-    --vip: #c2410c;
+    --vip: #b23b0b;
     --vip-soft: rgba(194, 65, 12, 0.12);
     --both: #6d28d9;
     --both-soft: rgba(109, 40, 217, 0.12);
-    --lineq: #0e7490;
+    --lineq: #0d6d87;
     --lineq-soft: rgba(14, 116, 144, 0.12);
     --lead: #1d4ed8;
-    --time-ink: #a16207;
+    --time-ink: #8f5706;
     --time-bg: rgba(202, 138, 4, 0.16);
     --time-mark: #0f766e;
     --brk: #b9c9d6;
-    --gap: #dc2626;
+    --gap: #c32121;
     --gap-bg: rgba(220, 38, 38, 0.08);
-    --thin: #c0561a;
+    --thin: #a54916;
     --thin-bg: rgba(192, 86, 26, 0.1);
     --peak: #9b1d32;
-    --ok: #1b7a52;
+    --ok: #19724d;
     --shadow: 0 16px 40px rgba(20, 50, 80, 0.08);
     --chip-on: #0f2744;
     --chip-on-ink: #f7fbfe;
@@ -256,6 +256,47 @@
   }
   .theme-swatches button.on { background: var(--rail); }
   .swatch { width: 14px; height: 14px; border-radius: 50%; flex: none; border: 1px solid var(--line); }
+  /* keyboard focus is always visible */
+  :focus-visible { outline: 2px solid var(--phase); outline-offset: 2px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  /* needs-attention chip and list */
+  .attn {
+    border: 1px solid var(--gap); background: var(--gap-bg); color: var(--gap);
+    border-radius: 999px; padding: 4px 10px; font-weight: 700; font-size: 12px;
+  }
+  .attn:hover { background: var(--gap); color: #fff; }
+  .attn-row {
+    display: block; width: 100%; text-align: left; border: 1px solid var(--line); background: var(--canvas);
+    border-radius: 12px; padding: 10px 12px; margin: 0 0 8px;
+  }
+  .attn-row:hover { border-color: var(--gap); }
+  .attn-row b { display: block; font-size: 14px; }
+  .attn-row span { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
+  /* account menu */
+  .avatar {
+    width: 34px; height: 34px; padding: 0 !important; display: inline-grid; place-items: center;
+    border-radius: 50% !important; background: var(--rail); font-weight: 800; letter-spacing: 0.02em;
+  }
+  .account-info { padding: 8px 9px 6px; border-bottom: 1px solid var(--line-soft); margin-bottom: 4px; }
+  .account-info b { display: block; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .account-info span { font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+  #signOutBtn { margin-top: 4px; border-top: 1px solid var(--line-soft); border-radius: 0 0 8px 8px; }
+  /* messages that do not block, and our own confirm dialog */
+  #toasts { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 70; display: grid; gap: 8px; width: min(440px, calc(100vw - 24px)); }
+  .toast {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    background: var(--paper); color: var(--ink); border: 1px solid var(--line); border-radius: 12px;
+    padding: 10px 14px; box-shadow: var(--shadow); font-size: 13px;
+  }
+  .toast.error { border-color: var(--gap); }
+  .toast button { border: 0; background: transparent; color: var(--phase); font-weight: 800; padding: 2px 4px; }
+  .confirm-bg { position: fixed; inset: 0; background: var(--overlay); display: grid; place-items: center; z-index: 60; padding: 20px; }
+  .confirm-bg .modal { width: min(420px, 100%); }
+  .loading-card { margin: 12vh auto 0; max-width: 420px; text-align: center; color: var(--muted); padding: 24px; }
+  .loading-card h2 { margin: 0 0 6px; color: var(--ink); font-family: var(--serif); }
+  .spinner { width: 28px; height: 28px; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--phase); margin: 0 auto 14px; animation: spin 0.9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
   .hint { display: none; }
   .workspace { display: flex; flex-direction: column; align-items: stretch; flex: 1; min-height: 0; overflow: hidden; }
   .filter-bar {
@@ -827,11 +868,18 @@
     .dnum-dow { display: inline; margin-left: 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
     .month-grid, .week-grid,
     .month-grid.hide-closed, .week-grid.hide-closed { grid-template-columns: 1fr; }
-    .nav-title { min-width: 0; flex: 1 1 auto; }
+    .nav-title { min-width: 96px; flex: 1 0 96px; }
+    .nav { width: 100%; }
     .nav-title strong { font-size: 17px; white-space: nowrap; }
     .nav { flex-wrap: wrap; }
-    .nav button, .ghost, .primary { min-height: 36px; padding: 6px 12px; }
-    .views button { min-height: 32px; padding: 6px 12px; }
+    .nav button, .ghost, .primary { min-height: 40px; padding: 6px 12px; }
+    .views button { min-height: 38px; padding: 6px 12px; }
+    .avatar { width: 40px; height: 40px; }
+    .actions { margin-left: 0; width: 100%; }
+    .attn-t { display: none; }
+    .attn::before { content: "! "; font-weight: 900; }
+    header.appbar { padding: 8px 12px; }
+    .toast button { min-height: 36px; padding: 4px 10px; }
   }
   @media print {
     html, body, .app { height: auto; overflow: visible; }
@@ -845,7 +893,7 @@
   <header class="appbar">
     <div class="appbar-row">
       <h1 class="brand">Shift Plan<span>SSS</span></h1>
-      <span class="team-live" id="teamLive">Connecting</span>
+      <span class="team-live" id="teamLive" role="status" aria-live="polite">Connecting</span>
       <div class="views" id="viewTabs">
         <button data-view="year" class="hidden">Year</button>
         <button data-view="month">Month</button>
@@ -862,12 +910,14 @@
       <div class="actions">
         <span class="editing-flag hidden" id="editFlag">Editing</span>
         <button type="button" class="ghost" id="sheetBtn">Shift Sheet</button>
-        <button type="button" class="ghost hidden" id="signOutBtn">Sign out</button>
+        <button type="button" class="attn hidden" id="attnBtn"></button>
         <div class="pop-wrap">
           <button type="button" class="ghost" id="themeBtn">Theme</button>
           <div class="pop hidden" id="themeMenu">
+            <div class="account-info hidden" id="accountInfo"><b id="accountEmail"></b><span id="accountRole"></span></div>
             <div class="pop-label">Color theme</div>
             <div class="theme-swatches" id="themeSwatches"></div>
+            <button type="button" class="hidden" id="signOutBtn">Sign out</button>
           </div>
         </div>
         <div class="pop-wrap">
@@ -911,6 +961,7 @@
     <iframe id="sheetFrame" title="Google Sheet" allow="clipboard-read; clipboard-write"></iframe>
   </section>
 </div>
+<div id="toasts" aria-live="polite"></div>
 <input id="fileIn" type="file" accept="application/json" class="hidden">
 <input id="hpFileIn" type="file" accept=".csv,.tsv,.txt,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
 <script id="coverage-snapshot" type="application/json">null</script>
@@ -1501,6 +1552,7 @@
   let snapshotUi = null;
   let hadLocalPlan = false;
   let teamFirstDone = false;
+  let teamLoadFailed = false;
   let serverRole = null;
   let serverEmail = "";
   function isAdminRole() { return serverRole === "admin" || serverRole === "super"; }
@@ -1836,13 +1888,17 @@
     try {
       do {
         teamQueued = false;
+        const first = !teamFirstDone;
         await reconcile(await readTeam());
         teamFirstDone = true;
+        teamLoadFailed = false;
+        if (first && !hadLocalPlan) render();
       } while (teamQueued && !screenBusy());
       teamPollMs = 20000;
     } catch (error) {
       teamPollMs = error && error.busy ? 90000 : 20000;
       setTeamStatus("Reconnecting", "wait");
+      if (!teamFirstDone && !hadLocalPlan && !teamLoadFailed) { teamLoadFailed = true; render(); }
     } finally {
       teamPushing = false;
     }
@@ -3500,9 +3556,9 @@
       persist();
       refreshHolidayModal();
       const extra = result.unknown.length ? " Skipped " + result.unknown.length + " cell" + (result.unknown.length === 1 ? "" : "s") + " that were not OFF, PTO, or hours." : "";
-      alert("Imported “" + result.plan.name + "” as an in-progress plan (" + result.people + " people, " + result.days + " days). Review it here, then Confirm holidays when it should go live." + extra);
+      toast("Imported “" + result.plan.name + "” as an in-progress plan (" + result.people + " people, " + result.days + " days). Review it here, then Confirm holidays when it should go live." + extra);
     }).catch(err => {
-      alert(err && err.message ? err.message : "Could not import that holiday plan.");
+      toast(err && err.message ? err.message : "Could not import that holiday plan.", { kind: "error" });
     });
   }
   function refreshHolidayModal() {
@@ -3654,9 +3710,9 @@
   }
   function addPerson(name) {
     name = (name || "").trim();
-    if (!name) { alert("Type a name first."); return; }
+    if (!name) { toast("Type a name first.", { kind: "error" }); return; }
     if (data.people.some(p => p.name.toLowerCase() === name.toLowerCase())) {
-      alert(name + " is already on the roster.");
+      toast(name + " is already on the roster.", { kind: "error" });
       return;
     }
     const p = sanitizePerson({
@@ -3674,12 +3730,12 @@
     ui.modal = "roster";
     render();
   }
-  function removePerson(name) {
+  async function removePerson(name) {
     if (data.people.length < 2) {
-      alert("Keep at least one person on the roster.");
+      toast("Keep at least one person on the roster.", { kind: "error" });
       return;
     }
-    if (!confirm("Remove " + name + " from the roster? Leave history stays.")) return;
+    if (!(await askConfirm("Remove " + name + " from the roster? Leave history stays.", "Remove"))) return;
     data.people = data.people.filter(p => p.name !== name);
     data.lineBars = (data.lineBars || []).filter(b => b.owner !== name);
     Object.values(data.days).forEach(day => {
@@ -3826,7 +3882,7 @@
       ? gridTableHtml(grid)
       : "<p>No people in this view.</p>";
     const w = window.open("", "_blank");
-    if (!w) { alert("Allow pop-ups to print this view."); return; }
+    if (!w) { toast("Allow pop-ups to print this view.", { kind: "error" }); return; }
     w.document.write("<!DOCTYPE html><html><head><title>" + esc(title) + "</title><style>" +
       "body{font:12px/1.35 Segoe UI,system-ui,sans-serif;color:#111;margin:24px}" +
       "h1{font-size:20px;margin:0 0 4px}p{color:#555;margin:0 0 18px}" +
@@ -4411,8 +4467,19 @@
     if (closedBtn) closedBtn.textContent = ui.showClosed ? "Hide Sundays" : "Show Sundays";
     if (ui.view === "year" && !ui.leadAccess) ui.view = "week";
     renderChrome();
-    renderTeamPane();
     const main = document.getElementById("main");
+    if (!teamFirstDone && !hadLocalPlan && !data.updatedAt && !openedFromSnapshot) {
+      // A browser with no plan of its own must not show or edit the built-in starter data while it waits for the team plan.
+      document.getElementById("teamPane").innerHTML = "";
+      main.innerHTML = teamLoadFailed
+        ? `<div class="loading-card"><h2>Could not load the team plan</h2><p>Check your connection, then try again. Nothing has been changed.</p><button type="button" class="primary" id="retryLoad">Try again</button></div>`
+        : `<div class="loading-card" role="status"><div class="spinner"></div><h2>Loading the team plan…</h2></div>`;
+      const retry = document.getElementById("retryLoad");
+      if (retry) retry.addEventListener("click", () => { teamLoadFailed = false; render(); syncTeam(); });
+      if (flushTeam) syncTeam();
+      return;
+    }
+    renderTeamPane();
     if (ui.view === "year") main.innerHTML = renderYear();
     else if (ui.view === "month") main.innerHTML = renderMonth();
     else if (ui.view === "week") main.innerHTML = renderWeek();
@@ -4634,7 +4701,7 @@
       for (; i < j; i++) {
         const p = people[i];
         const off = away.has(p.name);
-        html += `<div class="who-person ${off ? "off" : "q-" + weekTone(p)}"><button type="button" data-filter-name="${esc(p.name)}">${esc(p.name)}</button></div>`;
+        html += `<div class="who-person ${off ? "off" : "q-" + weekTone(p)}"><button type="button" data-filter-name="${esc(p.name)}" title="${esc(off ? "Away" : { lead: "Lead", line: "Support Line", both: "Phase 1 and VIP", vip: "VIP", phase: "Phase 1" }[weekTone(p)] || "")}">${esc(p.name)}</button></div>`;
       }
     }
     html += weekLineHtml(day, shown);
@@ -4862,10 +4929,12 @@
         const sel = document.querySelector('[data-late-pick="' + kind + '"]');
         if (!sel || !sel.value) return;
         const key = dateKey(ui.cursor);
+        const before = JSON.stringify(data.lateCover || {});
         data.lateCover = data.lateCover || {};
         data.lateCover[key] = Object.assign({}, data.lateCover[key] || {}, { [kind]: sel.value });
         persist();
         render();
+        toast(sel.value + " added as cover.", { undo: () => { data.lateCover = JSON.parse(before); persist(); render(); } });
       });
     });
     document.querySelectorAll("[data-anchor-add]").forEach(btn => {
@@ -4874,30 +4943,36 @@
         const sel = document.querySelector('[data-anchor-pick="' + kind + '"]');
         const blk = vipBlockFor(dateKey(ui.cursor));
         if (!sel || !sel.value || !blk) return;
+        const before = JSON.stringify(data.anchorCover || {});
         data.anchorCover = data.anchorCover || {};
         data.anchorCover[blk.start] = Object.assign({}, data.anchorCover[blk.start] || {}, { [kind]: sel.value });
         persist();
         render();
+        toast(sel.value + " added as anchor shift cover.", { undo: () => { data.anchorCover = JSON.parse(before); persist(); render(); } });
       });
     });
     document.querySelectorAll("[data-anchor-remove]").forEach(btn => {
       btn.addEventListener("click", () => {
         const blk = vipBlockFor(dateKey(ui.cursor));
         if (!blk || !data.anchorCover || !data.anchorCover[blk.start]) return;
+        const before = JSON.stringify(data.anchorCover);
         delete data.anchorCover[blk.start][btn.dataset.anchorRemove];
         if (!data.anchorCover[blk.start].late && !data.anchorCover[blk.start].phase1) delete data.anchorCover[blk.start];
         persist();
         render();
+        toast("Anchor shift cover removed.", { undo: () => { data.anchorCover = JSON.parse(before); persist(); render(); } });
       });
     });
     document.querySelectorAll("[data-late-remove]").forEach(btn => {
       btn.addEventListener("click", () => {
         const key = dateKey(ui.cursor);
         if (!data.lateCover || !data.lateCover[key]) return;
+        const before = JSON.stringify(data.lateCover);
         delete data.lateCover[key][btn.dataset.lateRemove];
         if (!data.lateCover[key].vip && !data.lateCover[key].phase1 && !data.lateCover[key].p1q) delete data.lateCover[key];
         persist();
         render();
+        toast("Cover removed.", { undo: () => { data.lateCover = JSON.parse(before); persist(); render(); } });
       });
     });
     const reset = document.getElementById("resetDay");
@@ -5289,7 +5364,7 @@
           const start = Number(lineStart.value);
           const end = Number(lineEnd.value);
           if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-            alert("Support Line end must be after start.");
+            toast("Support Line end must be after start.", { kind: "error" });
             return;
           }
           applyLineHours(ensureDay(key), p.name, start, end - start);
@@ -5568,7 +5643,7 @@
     const picked = [...box.querySelectorAll("[data-ooo-key]:checked")].map(el => el.dataset.oooKey);
     return picked.length ? picked : (seedKey ? [seedKey] : []);
   }
-  function startOoo(name, key) {
+  async function startOoo(name, key) {
     if (!name || !key || isClosedDay(key)) return;
     ui.oooSeed = { name, key };
     if (!ui.leadAccess) {
@@ -5577,7 +5652,7 @@
       return;
     }
     if (onLeave(name, key)) {
-      if (confirm(name + " is already OOO on " + holidayDateLabel(key) + ". Remove that day from their leave?")) {
+      if (await askConfirm(name + " is already OOO on " + holidayDateLabel(key) + ". Remove that day from their leave?", "Remove day")) {
         removeLeaveDay(name, key);
         if (ui.modal === "holiday") {
           const plan = currentHoliday();
@@ -6204,6 +6279,8 @@
     bg.addEventListener("click", e => { if (e.target === bg) { ui.afterPin = null; requestCloseModal(); } });
     const box = document.createElement("div");
     box.className = "card modal" + (kind === "review" || kind === "ooo" ? " wide" : kind === "roster" ? " roster" : kind === "holiday" ? " holiday" : "");
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
     if (kind === "pin") {
       box.innerHTML = `<h2>Lead access</h2>
         <p>Review, export, and schedule edits stay behind this PIN.</p>
@@ -6404,7 +6481,7 @@
       function applyRow(row) {
         const hours = readHoursFromRow(row);
         if (!hours) {
-          alert("End time must be after start for " + row.dataset.hoursName + ".");
+          toast("End time must be after start for " + row.dataset.hoursName + ".", { kind: "error" });
           return false;
         }
         const t = hoursTarget();
@@ -6460,7 +6537,7 @@
           applyPersonHours(row.dataset.hoursName, hours, t.scope, t.month, true);
         });
         if (!ok) {
-          alert("Every person needs an end time after their start.");
+          toast("Every person needs an end time after their start.", { kind: "error" });
           return;
         }
         persist();
@@ -6539,7 +6616,7 @@
       function applyOoo(applySug) {
         const keys = selectedKeys();
         if (!seed.name || !keys.length) {
-          alert("Pick at least one date.");
+          toast("Pick at least one date.", { kind: "error" });
           return;
         }
         const plan = ui.leavePlan || buildLeaveCoverageKeys(seed.name, keys);
@@ -6622,14 +6699,14 @@
         draftHolidayPlan(planOf());
         refreshHolidayModal();
       });
-      box.querySelector("#hpClear").addEventListener("click", () => {
-        if (!confirm("Clear OFF, PTO, and hour edits on this plan and start over? The plan name and dates stay.")) return;
+      box.querySelector("#hpClear").addEventListener("click", async () => {
+        if (!(await askConfirm("Clear OFF, PTO, and hour edits on this plan and start over? The plan name and dates stay.", "Clear"))) return;
         clearHolidayPlan(planOf());
         ui.holidayDate = null;
         refreshHolidayModal();
       });
-      box.querySelector("#hpDelete").addEventListener("click", () => {
-        if (!confirm("Delete this holiday plan? Confirmed offs come off the calendar.")) return;
+      box.querySelector("#hpDelete").addEventListener("click", async () => {
+        if (!(await askConfirm("Delete this holiday plan? Confirmed offs come off the calendar.", "Delete"))) return;
         deleteHolidayPlan(planOf());
         refreshHolidayModal();
       });
@@ -6691,6 +6768,9 @@
     bg.id = "usersBg";
     const box = document.createElement("div");
     box.className = "card modal users-modal";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    box.setAttribute("aria-label", "Users");
     bg.appendChild(box);
     bg.addEventListener("click", e => { if (e.target === bg) bg.remove(); });
     document.body.appendChild(bg);
@@ -6742,8 +6822,8 @@
         sel.addEventListener("change", () => { sel.disabled = true; send({ action: "role", email: sel.dataset.userRole, role: sel.value }); });
       });
       box.querySelectorAll("[data-user-remove]").forEach(btn => {
-        btn.addEventListener("click", () => {
-          if (!confirm("Remove " + btn.dataset.userRemove + "? They will lose access to the calendar right away.")) return;
+        btn.addEventListener("click", async () => {
+          if (!(await askConfirm("Remove " + btn.dataset.userRemove + "? They will lose access to the calendar right away.", "Remove"))) return;
           btn.disabled = true;
           send({ action: "remove", email: btn.dataset.userRemove });
         });
@@ -6789,6 +6869,9 @@
     bg.id = "logBg";
     const box = document.createElement("div");
     box.className = "card modal users-modal";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    box.setAttribute("aria-label", "Activity log");
     bg.appendChild(box);
     bg.addEventListener("click", e => { if (e.target === bg) bg.remove(); });
     document.body.appendChild(bg);
@@ -6838,6 +6921,113 @@
     } catch (err) {
       shell(`<p class="pin-err">${esc(err.message || "Could not load the activity log.")}</p>`);
     }
+  }
+  // ---- messages, confirmation, and the needs-attention list
+  function toast(message, opts) {
+    opts = opts || {};
+    const host = document.getElementById("toasts");
+    if (!host) return;
+    const el = document.createElement("div");
+    el.className = "toast" + (opts.kind === "error" ? " error" : "");
+    el.setAttribute("role", opts.kind === "error" ? "alert" : "status");
+    const text = document.createElement("span");
+    text.textContent = message;
+    el.appendChild(text);
+    if (opts.undo) {
+      const undo = document.createElement("button");
+      undo.type = "button";
+      undo.textContent = "Undo";
+      undo.addEventListener("click", () => { el.remove(); opts.undo(); });
+      el.appendChild(undo);
+    }
+    host.appendChild(el);
+    while (host.children.length > 3) host.removeChild(host.firstChild);
+    setTimeout(() => { if (el.parentNode) el.remove(); }, opts.undo ? 9000 : (opts.kind === "error" ? 8000 : 5000));
+  }
+  function askConfirm(message, okLabel) {
+    return new Promise(resolve => {
+      const bg = document.createElement("div");
+      bg.className = "confirm-bg";
+      bg.id = "confirmBg";
+      const box = document.createElement("div");
+      box.className = "card modal";
+      box.setAttribute("role", "alertdialog");
+      box.setAttribute("aria-modal", "true");
+      box.innerHTML = `<p style="font-size:15px;color:var(--ink);margin:0 0 4px">${esc(message)}</p>
+        <div class="modal-actions"><button type="button" class="ghost" id="cfNo">Cancel</button><button type="button" class="primary" id="cfYes">${esc(okLabel || "Confirm")}</button></div>`;
+      bg.appendChild(box);
+      document.body.appendChild(bg);
+      const done = value => { bg.remove(); resolve(value); };
+      bg.addEventListener("click", e => { if (e.target === bg) done(false); });
+      box.querySelector("#cfNo").addEventListener("click", () => done(false));
+      box.querySelector("#cfYes").addEventListener("click", () => done(true));
+      bg._cancel = () => done(false);
+      box.querySelector("#cfNo").focus();
+    });
+  }
+  // Nights in the next four weeks that still need a lead.
+  function attentionItems() {
+    const items = [];
+    const start = nightAnchor(new Date());
+    for (let i = 0; i < 28; i++) {
+      const d = addDays(start, i);
+      if (isClosedDay(d)) continue;
+      const key = dateKey(d);
+      const cov = coverageFor(key);
+      if (needsAction(cov, d, start)) items.push({ key, d, notes: cov.actionNote.split(" · ") });
+    }
+    return items;
+  }
+  let attnTimer = 0;
+  function scheduleAttentionChip() {
+    clearTimeout(attnTimer);
+    attnTimer = setTimeout(() => {
+      const btn = document.getElementById("attnBtn");
+      if (!btn) return;
+      const waiting = !teamFirstDone && !hadLocalPlan && !data.updatedAt;
+      const n = waiting ? 0 : attentionItems().length;
+      btn.classList.toggle("hidden", n === 0);
+      const label = n === 1 ? "1 night needs action" : n + " nights need action";
+      btn.innerHTML = `<span class="attn-n">${n}</span><span class="attn-t"> ${n === 1 ? "night needs" : "nights need"} action</span>`;
+      btn.setAttribute("aria-label", label);
+      btn.title = label;
+    }, 0);
+  }
+  function openAttentionPanel() {
+    const old = document.getElementById("attnBg");
+    if (old) old.remove();
+    const items = attentionItems();
+    const bg = document.createElement("div");
+    bg.className = "modal-bg";
+    bg.id = "attnBg";
+    const box = document.createElement("div");
+    box.className = "card modal users-modal";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-modal", "true");
+    box.setAttribute("aria-label", "Nights that need action");
+    const rows = items.map(it => `<button type="button" class="attn-row" data-attn-day="${it.key}"><b>${esc(it.d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }))}</b>` +
+      it.notes.map(n => `<span>${esc(n)}</span>`).join("") + `</button>`).join("");
+    box.innerHTML = `<h2>Needs action</h2><p>Nights in the next four weeks where a lead has to add cover. Open one to fix it.</p>
+      <div class="modal-scroll">${rows || "<p>Everything is covered.</p>"}</div>
+      <div class="modal-actions"><button type="button" class="ghost" id="attnClose">Close</button></div>`;
+    bg.appendChild(box);
+    bg.addEventListener("click", e => { if (e.target === bg) bg.remove(); });
+    document.body.appendChild(bg);
+    box.querySelector("#attnClose").addEventListener("click", () => bg.remove());
+    box.querySelectorAll("[data-attn-day]").forEach(btn => btn.addEventListener("click", () => {
+      bg.remove();
+      ui.cursor = parseKey(btn.dataset.attnDay);
+      setView("day");
+    }));
+    box.querySelector(".attn-row, #attnClose").focus();
+  }
+  // Escape closes our panels and confirm dialog.
+  function closeTopOverlay() {
+    const confirmBg = document.getElementById("confirmBg");
+    if (confirmBg && confirmBg._cancel) { confirmBg._cancel(); return true; }
+    const panel = document.getElementById("usersBg") || document.getElementById("logBg") || document.getElementById("attnBg");
+    if (panel) { panel.remove(); return true; }
+    return false;
   }
   function closeModal() {
     ui.modal = null;
@@ -6949,11 +7139,22 @@
   function renderChrome() {
     const yearBtn = document.querySelector('#viewTabs [data-view="year"]');
     if (yearBtn) yearBtn.classList.toggle("hidden", !ui.leadAccess);
-    const signOut = document.getElementById("signOutBtn");
-    if (signOut) {
-      signOut.classList.toggle("hidden", !SSS_GATED);
-      signOut.title = serverEmail ? "Signed in as " + serverEmail : "Sign out";
+    const themeBtn = document.getElementById("themeBtn");
+    const gatedAccount = SSS_GATED && !!serverEmail;
+    document.getElementById("accountInfo").classList.toggle("hidden", !gatedAccount);
+    document.getElementById("signOutBtn").classList.toggle("hidden", !gatedAccount);
+    themeBtn.classList.toggle("avatar", gatedAccount);
+    if (gatedAccount) {
+      const parts = serverEmail.split("@")[0].split(/[._-]+/).filter(Boolean);
+      themeBtn.textContent = (parts[1] ? parts[0][0] + parts[1][0] : (parts[0] || "?").slice(0, 2)).toUpperCase();
+      themeBtn.setAttribute("aria-label", "Account and theme for " + serverEmail);
+      document.getElementById("accountEmail").textContent = serverEmail;
+      document.getElementById("accountRole").textContent = { super: "Super Admin", admin: "Admin", member: "Member" }[serverRole] || "";
+    } else {
+      themeBtn.textContent = "Theme";
+      themeBtn.removeAttribute("aria-label");
     }
+    scheduleAttentionChip();
     if (SSS_GATED) {
       // Members get no Access button at all; Admins are unlocked by their role, so there is no PIN and nothing to lock.
       document.getElementById("accessBtn").classList.toggle("hidden", !isAdminRole());
@@ -6990,7 +7191,10 @@
     if (filtersWereOpen) renderTeamPane();
   }
 
-  applyTheme((function () { try { return localStorage.getItem(THEME_KEY); } catch (_) { return "night"; } })());
+  applyTheme((function () {
+    try { const saved = localStorage.getItem(THEME_KEY); if (saved) return saved; } catch (_) {}
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "frost" : "night";
+  })());
   applySnapshotUi();
 
   document.getElementById("logBtn").addEventListener("click", () => {
@@ -7053,6 +7257,7 @@
     renderChrome();
     exportCurrentView();
   });
+  document.getElementById("attnBtn").addEventListener("click", openAttentionPanel);
   document.getElementById("signOutBtn").addEventListener("click", () => {
     location.href = "/auth/logout";
   });
@@ -7072,11 +7277,11 @@
     e.target.value = "";
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       let next;
       try { next = sanitizeData(JSON.parse(reader.result)); }
-      catch (_) { alert("Could not read that JSON file."); return; }
-      if (!confirm("Replace the whole shared plan with this file? Everyone on the team will see it. A backup of the current plan is kept so you can use Restore backup.")) return;
+      catch (_) { toast("Could not read that JSON file.", { kind: "error" }); return; }
+      if (!(await askConfirm("Replace the whole shared plan with this file? Everyone on the team will see it. A backup of the current plan is kept so you can use Restore backup.", "Replace"))) return;
       takeBackup("Before importing a file", true);
       data = next;
       persist();
@@ -7084,15 +7289,15 @@
     };
     reader.readAsText(file);
   });
-  document.getElementById("restoreBtn").addEventListener("click", () => {
+  document.getElementById("restoreBtn").addEventListener("click", async () => {
     const list = readBackups();
-    if (!list.length) { alert("No backups yet. They are saved automatically before a teammate update or an import."); return; }
+    if (!list.length) { toast("No backups yet. They are saved automatically before a teammate update or an import."); return; }
     const lines = list.map((b, i) => (i + 1) + ". " + new Date(b.at).toLocaleString() + " — " + (b.reason || "Backup"));
     const pick = prompt("Restore which backup? Type its number.\n\n" + lines.join("\n"), "1");
     if (pick === null) return;
     const chosen = list[Number(pick) - 1];
-    if (!chosen) { alert("That is not a backup number."); return; }
-    if (!confirm("Replace the shared plan with the backup from " + new Date(chosen.at).toLocaleString() + "? Everyone on the team will see it.")) return;
+    if (!chosen) { toast("That is not a backup number.", { kind: "error" }); return; }
+    if (!(await askConfirm("Replace the shared plan with the backup from " + new Date(chosen.at).toLocaleString() + "? Everyone on the team will see it.", "Restore"))) return;
     takeBackup("Before restoring a backup", true);
     data = sanitizeData(JSON.parse(JSON.stringify(chosen.calendar)));
     ui.accessOpen = false;
@@ -7108,6 +7313,7 @@
   });
 
   document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && closeTopOverlay()) { e.preventDefault(); return; }
     if (e.key === "Escape" && !ui.modal && sheetPanel.open) { closeSheetPanel(); return; }
     if (e.key === "Escape" && ui.modal) {
       e.preventDefault();
@@ -7115,6 +7321,24 @@
       requestCloseModal();
     }
   });
+
+  // Swipe left or right to move to the next or previous month or day. Week view and the day timeline scroll sideways themselves, so they are left alone.
+  (function () {
+    const main = document.getElementById("main");
+    let sx = 0, sy = 0, t0 = 0, armed = false;
+    main.addEventListener("touchstart", e => {
+      const t = e.touches[0];
+      sx = t.clientX; sy = t.clientY; t0 = Date.now();
+      armed = e.touches.length === 1 && (ui.view === "month" || (ui.view === "day" && !e.target.closest(".planner"))) && !e.target.closest("select, input, textarea");
+    }, { passive: true });
+    main.addEventListener("touchend", e => {
+      if (!armed) return;
+      armed = false;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - sx, dy = t.clientY - sy;
+      if (Math.abs(dx) > 70 && Math.abs(dy) < 40 && Date.now() - t0 < 600) shiftCursor(dx < 0 ? 1 : -1);
+    }, { passive: true });
+  })();
 
   applySnapshotUi();
   render();
