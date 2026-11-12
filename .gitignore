@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 weekend-cover.json
+worker/public/
+worker/node_modules/
+worker/.dev.vars
+worker/.wrangler/

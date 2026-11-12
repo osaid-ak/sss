@@ -1,0 +1,10 @@
+name = "shift-plan"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+# The calendar page is copied into ./public by deploy.ps1 (it is not committed).
+# run_worker_first makes every request, including the page itself, go through the sign-in check.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true

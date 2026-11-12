@@ -21,6 +21,12 @@ Read this file before changing the calendar. Update it in the same change when b
 
 Do not commit `coverage-calendar.html`, `serve-calendar.py`, or secrets. On PowerShell, commit with `git commit -m "..."` and chain commands with `;`.
 
+## Sign-in gate (Cloudflare Worker, in `worker/`)
+
+Access is restricted to Intercom teammates whose email is on the allowed list. The worker serves the calendar page and proxies the shared plan; nothing is served before an Intercom OAuth sign-in. The allowed list, Intercom client ID and secret, session secret and plan address are Cloudflare secrets, never in the repo or in chat. `worker/README.md` has the setup and how to change the list. `worker/deploy.ps1` builds `worker/public/index.html` from `coverage-calendar.html` (swapping the plan address for `/api/team/plan`) and deploys; `worker/public/` is not committed. Run `node worker/test.mjs` after changing the worker.
+
+Status: the code is written and tested offline, but until the worker is deployed and the public copy is closed (see "Closing the public copy" in the worker README), the GitHub Pages page and the old plan address are still public and the Publish steps below still apply. Once the gate is live, publishing a calendar change means running `worker/deploy.ps1`, and `index.html` becomes the redirect stub. Update this file when that happens.
+
 ## How the data is shared
 
 Edits sync through the shared plan named `TEAM_PLAN` in the calendar file. A browser also keeps a local copy. Do not describe the calendar as Export/Import only.
