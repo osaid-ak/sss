@@ -3,8 +3,8 @@
 Puts "Sign in with Google" in front of the calendar and the shared team plan, with two roles:
 
 - **Member**: can view the calendar. No Access button, no lead tools.
-- **Admin**: lead access (no PIN), plus a Users list under Access where they can change Members' roles.
-- **Super Admin** (one person): everything an Admin can do, and the only one who can change another Admin's role. Always allowed in and always Super Admin.
+- **Admin**: lead access (no PIN), plus a Users list under Access where they can add people as Members, remove Members and change Members' roles.
+- **Super Admin** (one person): everything an Admin can do, and the only one who can add an Admin or change or remove another Admin. Always allowed in and always Super Admin.
 
 How it works: the worker serves the calendar page itself and proxies the shared plan. Nothing is served until the person has signed in with Google and their email is on the allowed list. The calendar file is copied in at deploy time (`deploy.ps1`) and is never committed. Roles are checked by the server on every request.
 

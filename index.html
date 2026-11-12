@@ -854,7 +854,7 @@
       <div class="actions">
         <span class="editing-flag hidden" id="editFlag">Editing</span>
         <button type="button" class="ghost" id="sheetBtn">Shift Sheet</button>
-        <button type="button" class="ghost" id="syncWeekendBtn">Sync sheet</button>
+        <button type="button" class="ghost hidden" id="signOutBtn">Sign out</button>
         <div class="pop-wrap">
           <button type="button" class="ghost" id="themeBtn">Theme</button>
           <div class="pop hidden" id="themeMenu">
@@ -6793,33 +6793,60 @@
           ? `<b>${label.super}</b>`
           : `<select data-user-role="${esc(u.email)}"${locked ? " disabled" : ""}>` +
             `<option value="member"${u.role === "member" ? " selected" : ""}>Member</option>` +
-            `<option value="admin"${u.role === "admin" ? " selected" : ""}>Admin</option></select>`;
+            `<option value="admin"${u.role === "admin" ? " selected" : ""}>Admin</option></select>` +
+            ` <button type="button" class="ghost" data-user-remove="${esc(u.email)}"${locked ? " disabled" : ""}>Remove</button>`;
         return `<tr><td style="padding:6px 10px 6px 0">${esc(u.email)}${mine ? " (you)" : ""}</td><td style="padding:6px 0">${control}</td></tr>`;
       }).join("");
+      const addRow = editable
+        ? `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:14px 0 0">
+            <input id="userNewEmail" type="email" placeholder="name@autoleap.com" autocomplete="off" style="flex:1 1 200px;min-width:0">
+            <select id="userNewRole"><option value="member">Member</option>${serverRole === "super" ? '<option value="admin">Admin</option>' : ""}</select>
+            <button type="button" class="primary" id="userAddBtn">Add user</button>
+          </div>`
+        : "";
       box.innerHTML = `<h2>Users</h2>
         <p>Admins have lead access. Members can view the calendar only. ${serverRole === "super" ? "You can change any role." : "Only the Super Admin can change an Admin."}</p>
         ${editable ? "" : `<p class="pin-err">Role changes are not set up yet (see the worker README).</p>`}
         ${note ? `<p class="pin-err">${esc(note)}</p>` : ""}
         <table style="border-collapse:collapse;width:100%">${rows}</table>
+        ${addRow}
         <div class="modal-actions"><button type="button" class="ghost" id="usersClose">Close</button></div>`;
       box.querySelector("#usersClose").addEventListener("click", () => bg.remove());
+      const send = async payload => {
+        try {
+          const res = await fetch("/api/users", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          const out = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(out.error || "That did not work.");
+          paint(out.users, true, "");
+        } catch (err) {
+          load(err && err.message ? err.message : "That did not work.");
+        }
+      };
       box.querySelectorAll("[data-user-role]").forEach(sel => {
-        sel.addEventListener("change", async () => {
-          sel.disabled = true;
-          try {
-            const res = await fetch("/api/users", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ email: sel.dataset.userRole, role: sel.value })
-            });
-            const out = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(out.error || "Could not change that role.");
-            paint(out.users, true, "");
-          } catch (err) {
-            load(err && err.message ? err.message : "Could not change that role.");
-          }
+        sel.addEventListener("change", () => { sel.disabled = true; send({ action: "role", email: sel.dataset.userRole, role: sel.value }); });
+      });
+      box.querySelectorAll("[data-user-remove]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          if (!confirm("Remove " + btn.dataset.userRemove + "? They will lose access to the calendar right away.")) return;
+          btn.disabled = true;
+          send({ action: "remove", email: btn.dataset.userRemove });
         });
       });
+      const addBtn = box.querySelector("#userAddBtn");
+      if (addBtn) {
+        const add = () => {
+          const email = box.querySelector("#userNewEmail").value.trim();
+          if (!email) return;
+          addBtn.disabled = true;
+          send({ action: "add", email, role: box.querySelector("#userNewRole").value });
+        };
+        addBtn.addEventListener("click", add);
+        box.querySelector("#userNewEmail").addEventListener("keydown", e => { if (e.key === "Enter") add(); });
+      }
     };
     const load = async note => {
       try {
@@ -6947,6 +6974,11 @@
   function renderChrome() {
     const yearBtn = document.querySelector('#viewTabs [data-view="year"]');
     if (yearBtn) yearBtn.classList.toggle("hidden", !ui.leadAccess);
+    const signOut = document.getElementById("signOutBtn");
+    if (signOut) {
+      signOut.classList.toggle("hidden", !SSS_GATED);
+      signOut.title = serverEmail ? "Signed in as " + serverEmail : "Sign out";
+    }
     if (SSS_GATED) {
       // Members get no Access button at all; Admins are unlocked by their role, so there is no PIN and nothing to lock.
       document.getElementById("accessBtn").classList.toggle("hidden", !isAdminRole());
@@ -7041,22 +7073,8 @@
     renderChrome();
     exportCurrentView();
   });
-  document.getElementById("syncWeekendBtn").addEventListener("click", () => {
-    Promise.all([pullWeekendCover(true), pullVipPlan(), pullSheetPlan()]).then(([changed, vipChanged, planChanged]) => {
-      const lines = [];
-      if (!(weekendSync.error && !weekendSync.last)) {
-        lines.push(changed
-          ? "Updated " + changed + " Saturday" + (changed === 1 ? "" : "s") + " from Actual Cover."
-          : "Saturday cover already matches Actual Cover.");
-      }
-      lines.push(vipSync.error
-        ? "VIP Coverage Plan: " + vipSync.error
-        : vipChanged ? "Updated the VIP late shift and Phase 1 blocks from Actual Cover." : "VIP late shift and Phase 1 blocks already match Actual Cover.");
-      lines.push(planSync.error
-        ? "Phase 1 / Support Line tab: " + planSync.error
-        : planChanged ? "Updated shift hours, breaks and the Support Line rotation from the sheet." : "Shift hours, breaks and the Support Line rotation already match the sheet.");
-      alert(lines.join("\n"));
-    });
+  document.getElementById("signOutBtn").addEventListener("click", () => {
+    location.href = "/auth/logout";
   });
   document.getElementById("exportBtn").addEventListener("click", () => {
     download("coverage-calendar.json", JSON.stringify(data, null, 2), "application/json");

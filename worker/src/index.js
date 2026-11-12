@@ -14,7 +14,7 @@
 //   ALLOWED_EMAILS  comma-separated: everyone who may sign in
 //   ADMIN_EMAILS    comma-separated: who starts as an Admin (everyone else starts as a Member)
 //   SUPER_ADMIN     one email: always allowed, always the Super Admin, can change Admins' roles
-// Role changes made in the app are kept in the ROLES key-value store and win over ADMIN_EMAILS.
+// Role changes, added people and removed people made in the app are kept in the ROLES key-value store. Roles win over ADMIN_EMAILS.
 // ALLOWED_EMAILS is re-read on every request, so removing an email locks that person out immediately.
 
 const SESSION_COOKIE = "sss_session";
@@ -66,10 +66,24 @@ function emailList(value) {
   return String(value || "").split(",").map(x => x.trim().toLowerCase()).filter(Boolean);
 }
 function superEmail(env) { return String(env.SUPER_ADMIN || "").trim().toLowerCase(); }
-function allowed(env, email) {
+// People added or removed from the app are kept in the ROLES store, on top of the ALLOWED_EMAILS secret.
+async function storedUsers(env) {
+  if (!env.ROLES) return { added: [], removed: [] };
+  try {
+    const u = JSON.parse((await env.ROLES.get("users")) || "{}") || {};
+    return { added: Array.isArray(u.added) ? u.added : [], removed: Array.isArray(u.removed) ? u.removed : [] };
+  } catch (e) { return { added: [], removed: [] }; }
+}
+async function accessSet(env, users) {
+  const u = users || await storedUsers(env);
+  const set = new Set([...emailList(env.ALLOWED_EMAILS), ...u.added.map(x => String(x).toLowerCase())]);
+  u.removed.forEach(x => set.delete(String(x).toLowerCase()));
+  if (superEmail(env)) set.add(superEmail(env));
+  return set;
+}
+async function isAllowed(env, email) {
   if (!email) return false;
-  const e = String(email).trim().toLowerCase();
-  return e === superEmail(env) || emailList(env.ALLOWED_EMAILS).includes(e);
+  return (await accessSet(env)).has(String(email).trim().toLowerCase());
 }
 async function storedRoles(env) {
   if (!env.ROLES) return {};
@@ -93,7 +107,7 @@ async function sessionEmail(request, env) {
   let data;
   try { data = JSON.parse(new TextDecoder().decode(b64urlDecode(value))); } catch (e) { return null; }
   if (!data || !data.e || !data.x || data.x < Date.now()) return null;
-  return allowed(env, data.e) ? data.e : null;
+  return (await isAllowed(env, data.e)) ? data.e : null;
 }
 
 const HEADERS = { "Cache-Control": "private, no-store", "X-Robots-Tag": "noindex, nofollow" };
@@ -159,7 +173,7 @@ async function callback(request, env) {
   if (!meRes.ok) return failed("Could not read your Google email.");
   const me = await meRes.json();
   // The Google token is not kept: it was only needed to learn who signed in.
-  if (!me || me.email_verified !== true || !allowed(env, me.email)) {
+  if (!me || me.email_verified !== true || !(await isAllowed(env, me.email))) {
     return new Response(denied().body, { status: 403, headers: Object.assign({ "Content-Type": "text/html; charset=utf-8", "Set-Cookie": cookie(STATE_COOKIE, "", 0) }, HEADERS) });
   }
   const payload = b64url(enc.encode(JSON.stringify({ e: String(me.email).toLowerCase(), x: Date.now() + SESSION_DAYS * 86400000 })));
@@ -173,27 +187,55 @@ async function callback(request, env) {
 const RANK = { super: 0, admin: 1, member: 2 };
 async function listUsers(env) {
   const stored = await storedRoles(env);
-  const emails = [...new Set([superEmail(env), ...emailList(env.ALLOWED_EMAILS)].filter(Boolean))];
+  const emails = [...await accessSet(env)];
   const users = [];
   for (const email of emails) users.push({ email, role: await roleOf(env, email, stored) });
   users.sort((a, b) => (RANK[a.role] - RANK[b.role]) || a.email.localeCompare(b.email));
   return users;
 }
 
-async function changeRole(request, env, actorEmail) {
+const EMAIL_RE = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/;
+async function userAction(request, env, actorEmail) {
   const actor = await roleOf(env, actorEmail);
   if (actor !== "admin" && actor !== "super") return json({ error: "admins only" }, 403);
   if (!env.ROLES) return json({ error: "role storage is not set up" }, 501);
   let body;
   try { body = await request.json(); } catch (e) { return json({ error: "bad request" }, 400); }
+  const action = (body && body.action) || "role";
   const target = String((body && body.email) || "").trim().toLowerCase();
   const role = body && body.role;
-  if (!allowed(env, target)) return json({ error: "unknown person" }, 404);
-  if (role !== "admin" && role !== "member") return json({ error: "role must be admin or member" }, 400);
   const stored = await storedRoles(env);
+  const users = await storedUsers(env);
+
+  if (action === "add") {
+    if (!EMAIL_RE.test(target)) return json({ error: "Enter a valid email address." }, 400);
+    if (role !== "admin" && role !== "member") return json({ error: "role must be admin or member" }, 400);
+    if (role === "admin" && actor !== "super") return json({ error: "Only the Super Admin can add an Admin." }, 403);
+    if ((await accessSet(env, users)).has(target)) return json({ error: "That person already has access." }, 409);
+    users.removed = users.removed.filter(x => String(x).toLowerCase() !== target);
+    if (!emailList(env.ALLOWED_EMAILS).includes(target) && !users.added.includes(target)) users.added.push(target);
+    stored[target] = role;
+    await env.ROLES.put("users", JSON.stringify(users));
+    await env.ROLES.put("roles", JSON.stringify(stored));
+    return json({ ok: true, users: await listUsers(env) });
+  }
+
+  if (!(await accessSet(env, users)).has(target)) return json({ error: "unknown person" }, 404);
   const current = await roleOf(env, target, stored);
-  if (current === "super") return json({ error: "The Super Admin role cannot be changed." }, 403);
-  if (current === "admin" && actor !== "super") return json({ error: "Only the Super Admin can change an Admin role." }, 403);
+  if (current === "super") return json({ error: "The Super Admin cannot be changed or removed." }, 403);
+  if (current === "admin" && actor !== "super") return json({ error: "Only the Super Admin can change or remove an Admin." }, 403);
+
+  if (action === "remove") {
+    if (target === String(actorEmail).toLowerCase()) return json({ error: "You cannot remove yourself." }, 403);
+    users.added = users.added.filter(x => String(x).toLowerCase() !== target);
+    if (emailList(env.ALLOWED_EMAILS).includes(target) && !users.removed.includes(target)) users.removed.push(target);
+    delete stored[target];
+    await env.ROLES.put("users", JSON.stringify(users));
+    await env.ROLES.put("roles", JSON.stringify(stored));
+    return json({ ok: true, users: await listUsers(env) });
+  }
+
+  if (role !== "admin" && role !== "member") return json({ error: "role must be admin or member" }, 400);
   stored[target] = role;
   await env.ROLES.put("roles", JSON.stringify(stored));
   return json({ ok: true, users: await listUsers(env) });
@@ -242,7 +284,7 @@ export default {
         const role = await roleOf(env, email);
         if (role !== "admin" && role !== "super") return json({ error: "admins only" }, 403);
         if (request.method === "GET") return json({ users: await listUsers(env), editable: !!env.ROLES });
-        if (request.method === "POST") return changeRole(request, env, email);
+        if (request.method === "POST") return userAction(request, env, email);
         return json({ error: "method not allowed" }, 405);
       }
       if (path.startsWith("/api/team/")) return proxyPlan(request, env, path.slice("/api/team/".length));
