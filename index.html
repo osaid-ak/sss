@@ -2244,12 +2244,13 @@
     const t = String(raw || "").replace(/\s+/g, " ").trim();
     const a = weekendParseDate(t);
     if (a) return a;
-    const m = t.match(/([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})$/);
+    const m = t.match(/([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4}|\d{2})$/);
     if (!m) return null;
     const months = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
     const month = months[m[1].slice(0, 3).toLowerCase()];
     if (!month) return null;
-    return m[3] + "-" + String(month).padStart(2, "0") + "-" + String(Number(m[2])).padStart(2, "0");
+    const year = m[3].length === 2 ? "20" + m[3] : m[3];
+    return year + "-" + String(month).padStart(2, "0") + "-" + String(Number(m[2])).padStart(2, "0");
   }
   function parseVipPlanRows(rows) {
     const label = v => weekendHeaderLabel(v);
@@ -2452,6 +2453,12 @@
       .then(rows => {
         const next = sanitizeSheetPlan(parseSheetPlanRows(rows));
         if (!next.line.length && !Object.keys(next.hours).length) throw new Error("Nothing readable was found on the Phase 1 / Support Line tab.");
+        // A failed read keeps the last copy: if the rotation could not be read this time, keep the one we had.
+        const had = (data.sheetPlan && data.sheetPlan.line) || [];
+        if (!next.line.length && had.length) {
+          next.line = had;
+          planSync.error = "Could not read the Support Line rotation dates; kept the last copy.";
+        }
         planSync.last = new Date().toISOString();
         planSync.error = "";
         if (sameJson(next, sanitizeSheetPlan(data.sheetPlan))) return 0;
