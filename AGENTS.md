@@ -61,6 +61,7 @@ Anchor shifts: 5pm–2am, 6pm–3am and 8pm–5am (summer clocks, one hour later
 - DST is automatic and follows US Eastern time, because shifts are anchored to ET. Stored clocks are the summer (EDT) schedule. From the first Sunday of November to the second Sunday of March, every date shows its shifts, breaks, splits, line assignments and Saturday windows one hour later in PKT, and the Peak window (7pm–12am becomes 8pm–1am) and Support Line window (5pm–3am becomes 6pm–4am) move with them. The board itself stays 3pm–8am PKT. There is no DST button, and `dst` in saved data is always false. Older plans saved with the global switch on are converted back to the summer schedule on load. Per-day edits are stored as shown for that day. Do not reintroduce a manual switch unless asked.
 - The lead PIN is in the page source. Do not print it in chat or in the UI.
 
+- UI regression check: every change that adds or alters something visible must be looked at on screen before it is published, not only syntax-checked. Check a desktop width and a phone width (375px), the Night and Frost themes, and long content (for example the user list with 15+ people, a day with many names). Panels that can grow (Users, Activity log, modals) keep their header and buttons fixed and scroll only the list, and must fit inside the window. Do this alongside the data checks, every time.
 - Calendar text (month, week, day and timeline) is one pixel larger than the original sizes, with the same layout. Keep that scale when adding new text.
 
 ## Already in place

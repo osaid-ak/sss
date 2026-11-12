@@ -663,6 +663,30 @@
   .modal select { padding-right: 28px; }
   .modal input[type="radio"], .modal input[type="checkbox"] { width: auto; padding: 0; }
   .modal-bg.stack { z-index: 45; }
+  /* Users and Activity log: the header and buttons stay put, only the list scrolls. */
+  .modal.users-modal { width: min(660px, 100%); display: flex; flex-direction: column; max-height: calc(100vh - 40px); max-height: calc(100dvh - 40px); }
+  .users-modal .modal-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; margin: 0 -8px; padding: 0 8px; }
+  .user-row, .user-add { display: grid; grid-template-columns: minmax(0, 1fr) 118px auto; gap: 8px; align-items: center; }
+  .user-row { padding: 7px 0; border-bottom: 1px solid var(--line-soft); }
+  .user-row:last-child { border-bottom: 0; }
+  .user-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+  .user-email small { color: var(--muted); margin-left: 6px; }
+  .user-row select, .user-add select { padding: 5px 26px 5px 9px; font-size: 13px; }
+  .user-row .ghost, .user-add .primary { padding: 5px 11px; font-size: 12px; white-space: nowrap; }
+  .user-add { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .user-add input { padding: 6px 10px; font-size: 13px; }
+  .user-role-fixed { font-size: 13px; font-weight: 700; padding: 0 9px; }
+  .log-row { display: grid; grid-template-columns: 118px 112px minmax(0, 1fr); gap: 4px 10px; padding: 6px 0; border-bottom: 1px solid var(--line-soft); font-size: 13px; }
+  .log-row:last-child { border-bottom: 0; }
+  .log-row .log-who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .log-row .log-more { grid-column: 3; color: var(--muted); }
+  .log-bad { color: var(--gap); font-weight: 700; }
+  @media (max-width: 560px) {
+    .user-row, .user-add { grid-template-columns: minmax(0, 1fr) auto; }
+    .user-row .user-email, .user-add input { grid-column: 1 / -1; }
+    .log-row { grid-template-columns: 1fr 1fr; }
+    .log-row .log-who, .log-row .log-more { grid-column: 1 / -1; }
+  }
   .ooo-choice {
     display: flex; align-items: center; gap: 8px; margin: 6px 0;
     color: var(--ink); font-weight: 600; cursor: pointer;
@@ -6781,27 +6805,28 @@
     bg.className = "modal-bg";
     bg.id = "usersBg";
     const box = document.createElement("div");
-    box.className = "card modal";
+    box.className = "card modal users-modal";
     bg.appendChild(box);
     bg.addEventListener("click", e => { if (e.target === bg) bg.remove(); });
     document.body.appendChild(bg);
     const label = { super: "Super Admin", admin: "Admin", member: "Member" };
     const paint = (users, editable, note) => {
+      const keep = box.querySelector(".modal-scroll") ? box.querySelector(".modal-scroll").scrollTop : 0;
       const rows = users.map(u => {
         const mine = u.email === serverEmail;
         const locked = !editable || u.role === "super" || mine || (u.role === "admin" && serverRole !== "super");
-        const control = u.role === "super"
-          ? `<b>${label.super}</b>`
-          : `<select data-user-role="${esc(u.email)}"${locked ? " disabled" : ""}>` +
-            `<option value="member"${u.role === "member" ? " selected" : ""}>Member</option>` +
-            `<option value="admin"${u.role === "admin" ? " selected" : ""}>Admin</option></select>` +
-            ` <button type="button" class="ghost" data-user-remove="${esc(u.email)}"${locked ? " disabled" : ""}>Remove</button>`;
-        return `<tr><td style="padding:6px 10px 6px 0">${esc(u.email)}${mine ? " (you)" : ""}</td><td style="padding:6px 0">${control}</td></tr>`;
+        const email = `<div class="user-email" title="${esc(u.email)}">${esc(u.email)}${mine ? "<small>you</small>" : ""}</div>`;
+        if (u.role === "super") return `<div class="user-row">${email}<div class="user-role-fixed">${label.super}</div><span></span></div>`;
+        return `<div class="user-row">${email}` +
+          `<select data-user-role="${esc(u.email)}" aria-label="Role for ${esc(u.email)}"${locked ? " disabled" : ""}>` +
+          `<option value="member"${u.role === "member" ? " selected" : ""}>Member</option>` +
+          `<option value="admin"${u.role === "admin" ? " selected" : ""}>Admin</option></select>` +
+          `<button type="button" class="ghost" data-user-remove="${esc(u.email)}"${locked ? " disabled" : ""}>Remove</button></div>`;
       }).join("");
       const addRow = editable
-        ? `<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:14px 0 0">
-            <input id="userNewEmail" type="email" placeholder="name@autoleap.com" autocomplete="off" style="flex:1 1 200px;min-width:0">
-            <select id="userNewRole"><option value="member">Member</option>${serverRole === "super" ? '<option value="admin">Admin</option>' : ""}</select>
+        ? `<div class="user-add">
+            <input id="userNewEmail" type="email" placeholder="name@autoleap.com" autocomplete="off" aria-label="Email to add">
+            <select id="userNewRole" aria-label="Role for the new user"><option value="member">Member</option>${serverRole === "super" ? '<option value="admin">Admin</option>' : ""}</select>
             <button type="button" class="primary" id="userAddBtn">Add user</button>
           </div>`
         : "";
@@ -6809,10 +6834,11 @@
         <p>Admins have lead access. Members can view the calendar only. ${serverRole === "super" ? "You can change any role." : "Only the Super Admin can change an Admin."}</p>
         ${editable ? "" : `<p class="pin-err">Role changes are not set up yet (see the worker README).</p>`}
         ${note ? `<p class="pin-err">${esc(note)}</p>` : ""}
-        <table style="border-collapse:collapse;width:100%">${rows}</table>
+        <div class="modal-scroll">${rows}</div>
         ${addRow}
         <div class="modal-actions"><button type="button" class="ghost" id="usersClose">Close</button></div>`;
       box.querySelector("#usersClose").addEventListener("click", () => bg.remove());
+      box.querySelector(".modal-scroll").scrollTop = keep;
       const send = async payload => {
         try {
           const res = await fetch("/api/users", {
@@ -6870,7 +6896,7 @@
     bg.className = "modal-bg";
     bg.id = "logBg";
     const box = document.createElement("div");
-    box.className = "card modal wide";
+    box.className = "card modal users-modal";
     bg.appendChild(box);
     bg.addEventListener("click", e => { if (e.target === bg) bg.remove(); });
     document.body.appendChild(bg);
@@ -6886,12 +6912,12 @@
       const rows = (out.log || []).map(e => {
         const when = new Date(e.t);
         const stamp = isNaN(when) ? esc(e.t) : esc(when.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }));
-        const bad = /refused/.test(e.event) ? ' style="color:var(--gap)"' : "";
-        return `<tr><td style="padding:4px 10px 4px 0;white-space:nowrap">${stamp}</td><td style="padding:4px 10px 4px 0"${bad}>${esc(e.event)}</td>` +
-          `<td style="padding:4px 10px 4px 0">${esc(e.email)}</td><td style="padding:4px 0;color:var(--muted)">${esc(e.detail || "")}${e.country ? " · " + esc(e.country) : ""}</td></tr>`;
+        const more = [e.detail, e.country].filter(Boolean).map(esc).join(" · ");
+        return `<div class="log-row"><span>${stamp}</span><span${/refused/.test(e.event) ? ' class="log-bad"' : ""}>${esc(e.event)}</span>` +
+          `<span class="log-who" title="${esc(e.email)}">${esc(e.email)}</span>${more ? `<span class="log-more">${more}</span>` : ""}</div>`;
       }).join("");
       shell(`<p>The latest ${out.kept} sign-ins, sign-outs and user changes, newest first. Times are in your time zone.</p>` +
-        (rows ? `<div style="max-height:60vh;overflow:auto"><table style="border-collapse:collapse;width:100%;font-size:13px">${rows}</table></div>` : "<p>Nothing recorded yet.</p>"));
+        (rows ? `<div class="modal-scroll">${rows}</div>` : "<p>Nothing recorded yet.</p>"));
     } catch (err) {
       shell(`<p class="pin-err">${esc(err.message || "Could not load the activity log.")}</p>`);
     }
