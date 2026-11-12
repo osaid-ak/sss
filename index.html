@@ -4269,7 +4269,7 @@
       onPhase: heads.onPhase,
       onVip: heads.onVip,
       onLine: heads.onLine,
-      gap: peakPhase.some(v => v === 0) || peakVip.some(v => v === 0) || lineSpan.some(v => v === 0) || late.missing.length > 0,
+      gap: peakPhase.some(v => v === 0) || peakVip.some(v => v === 0) || lineSpan.some(v => v === 0) || (ui.leadAccess && late.missing.length > 0),
       thin: peakPhase.some(v => v === 1) || peakVip.some(v => v === 1) || lineSpan.some(v => v === 1)
     };
   }
@@ -4352,9 +4352,10 @@
         return a.name.localeCompare(b.name);
       });
       const cover = weekendCoverOf(key);
+      const cv = coverByName(coveringFor(key, day));
       let html = cover ? `<div class="weekend-tag">Weekend cover</div>` : "";
       html += people.map(p =>
-        `<div class="person-line${day.away.has(p.name) ? " off" : ""}">${esc(p.name)} · ${esc(hoursLabel(p))}</div>`
+        `<div class="person-line${day.away.has(p.name) ? " off" : ""}"${cv[p.name] ? ` title="${esc(coverTitle(cv[p.name]))}"` : ""}>${esc(p.name)}${cv[p.name] ? " (covering)" : ""} · ${esc(hoursLabel(p))}</div>`
       ).join("");
       return html;
     }
@@ -4642,7 +4643,7 @@
 
   // A night that still needs a lead to add cover. Nights that have already passed are not flagged.
   function needsAction(cov, d, today) {
-    return !!(cov && cov.actionNeeded && !isPastNight(d, today));
+    return !!(ui.leadAccess && cov && cov.actionNeeded && !isPastNight(d, today));
   }
   function renderMonth() {
     const y = ui.cursor.getFullYear(), m = ui.cursor.getMonth();
@@ -4678,8 +4679,9 @@
     if (r.line) return "line";
     return "lead";
   }
-  function weekWhoHtml(day, shown) {
+  function weekWhoHtml(day, shown, key) {
     const away = day.away;
+    const cv = coverByName(coveringFor(key, day));
     const rank = { lead: 0, vip: 1, phase: 2, both: 3, line: 4 };
     const people = shown.slice().sort((a, b) => {
       if (a.start !== b.start) return a.start - b.start;
@@ -4701,13 +4703,13 @@
       for (; i < j; i++) {
         const p = people[i];
         const off = away.has(p.name);
-        html += `<div class="who-person ${off ? "off" : "q-" + weekTone(p)}"><button type="button" data-filter-name="${esc(p.name)}" title="${esc(off ? "Away" : { lead: "Lead", line: "Support Line", both: "Phase 1 and VIP", vip: "VIP", phase: "Phase 1" }[weekTone(p)] || "")}">${esc(p.name)}</button></div>`;
+        html += `<div class="who-person ${off ? "off" : "q-" + weekTone(p)}"><button type="button" data-filter-name="${esc(p.name)}" title="${esc(off ? "Away" : coverTitle((cv[p.name] || []).filter(e => e.kind !== "line")) || { lead: "Lead", line: "Support Line", both: "Phase 1 and VIP", vip: "VIP", phase: "Phase 1" }[weekTone(p)] || "")}">${esc(p.name)}${(cv[p.name] || []).some(e => e.kind !== "line") ? " (covering)" : ""}</button></div>`;
       }
     }
-    html += weekLineHtml(day, shown);
+    html += weekLineHtml(day, shown, cv);
     return `<div class="who">${html}</div>`;
   }
-  function weekLineHtml(day, shown) {
+  function weekLineHtml(day, shown, cv) {
     const names = new Set(shown.map(p => p.name));
     const bars = (day.lineBars || []).filter(b => names.has(b.owner));
     if (!bars.length) return "";
@@ -4729,7 +4731,7 @@
       html += `<div class="who-time"><span>${esc(slotLabel(start))}</span><span>${on}</span></div>`;
       for (; i < j; i++) {
         const off = day.away.has(bars[i].owner);
-        html += `<div class="who-person ${off ? "off" : "q-line"}"><button type="button" data-filter-name="${esc(bars[i].owner)}">${esc(bars[i].owner)}${bars[i].backupInfo || bars[i].backupMark ? " (backup)" : ""}</button></div>`;
+        html += `<div class="who-person ${off ? "off" : "q-line"}"><button type="button" data-filter-name="${esc(bars[i].owner)}">${esc(bars[i].owner)}${(cv[bars[i].owner] || []).some(e => e.kind === "line") ? " (covering)" : ""}</button></div>`;
       }
     }
     return html + "</div>";
@@ -4752,7 +4754,7 @@
         : dim ? ""
         : (day.weekend && !shown.length)
           ? `<div class="weekend-tag">Weekend cover</div><div class="closed-label">Waiting for Actual Cover</div>`
-          : weekWhoHtml(day, shown);
+          : weekWhoHtml(day, shown, key);
       html += `<article class="card week-col ${needsAction(cov, d, today) ? "needs-action" : ""} ${sameDay(d, today) ? "today" : ""} ${isPastNight(d, today) ? "past" : ""} ${dim ? "dim" : toneClass(cov)}" data-open-day="${key}">
         ${needsAction(cov, d, today) ? `<span class="action-badge" title="${esc(cov.actionNote)}">Lead action</span>` : ""}
         <h3>${DOW[i]} <b>${d.getDate()}</b></h3>
@@ -4768,6 +4770,58 @@
       if (!lineBars.some(b => !away.has(b.owner) && b.start <= t && t < b.start + b.len)) return false;
     }
     return true;
+  }
+  // Who is covering whom on a night, and for what. Built from the arranged cover only (the late-shift and anchor covers a lead
+  // added, the Phase 1 queue cover, and the Support Line backup or a bar a lead placed over an absent owner's slot).
+  function coveringFor(key, day) {
+    const out = [];
+    if (isClosedDay(key) || isSaturday(key)) return out;
+    day = day || resolveDay(key);
+    const range = slotLabel(lateStartFor(key)) + "–" + slotLabel(lateStartFor(key) + VIP_LATE_LEN);
+    const c = lateCoverFor(key) || {};
+    const blk = vipBlockFor(key) || {};
+    const st = lateStatus(day.people, day.away, key);
+    const absentFor = kind => {
+      const same = st.absent.filter(n => { const p = day.people.find(x => x.name === n); return p && rolesOf(p)[kind]; });
+      return (same.length ? same : st.absent).join(", ");
+    };
+    if (c.vip) out.push({ name: c.vip, kind: "late", for: absentFor("vip"), what: "the VIP late shift " + range });
+    if (c.phase1) out.push({ name: c.phase1, kind: "late", for: absentFor("phase1"), what: "the Phase 1 late shift " + range });
+    if (c.p1q) out.push({ name: c.p1q, kind: "queue", for: blk.phase1 || "", what: "Phase 1" });
+    anchorGaps(key).forEach(g => {
+      const name = anchorCoverFor(g.block)[g.kind];
+      if (name) out.push({ name, kind: "anchor", for: g.person, what: "the " + anchorLabel(g) + " VIP shift" });
+    });
+    const rot = lineRotationFor(key);
+    if (rot) {
+      const off = dstSlots(key);
+      rot.slots.forEach((owner, i) => {
+        if (!owner || !day.away.has(owner) || !LINE_SLOTS[i]) return;
+        const lo = LINE_SLOTS[i].start + off, hi = lo + LINE_SLOTS[i].len;
+        const what = "Support Line " + slotLabel(lo) + "–" + slotLabel(hi);
+        const auto = day.lineBars.find(b => b.backupInfo && b.backupInfo.owner === owner);
+        if (auto) {
+          const info = auto.backupInfo;
+          const extra = info.to ? `${auto.owner}'s shift was adjusted to ${slotLabel(info.to[0])}–${slotLabel(info.to[0] + info.to[1])} to cover the Support Line.` : `${auto.owner}'s shift already covered it.`;
+          out.push({ name: auto.owner, kind: "line", for: owner, what, extra });
+          return;
+        }
+        if (slotCovered(day.lineBars, day.away, lo, hi - lo)) {
+          [...new Set(day.lineBars.filter(b => !day.away.has(b.owner) && b.start < hi && b.start + b.len > lo).map(b => b.owner))]
+            .forEach(name => out.push({ name, kind: "line", for: owner, what }));
+        }
+      });
+    }
+    return out;
+  }
+  // name -> what they are covering, for the "(covering)" tags
+  function coverByName(list) {
+    const map = {};
+    list.forEach(e => { (map[e.name] = map[e.name] || []).push(e); });
+    return map;
+  }
+  function coverTitle(entries) {
+    return (entries || []).map(e => "Covering " + (e.for ? e.for + " on " : "") + e.what).join("; ");
   }
   // Everyone already used as cover on this night or in this block, so nobody is given two jobs.
   function committedNames(key) {
@@ -4791,47 +4845,33 @@
     const range = slotLabel(st.start) + "–" + slotLabel(st.start + VIP_LATE_LEN);
     const kindName = { vip: "VIP", phase1: "Phase 1" };
     const lines = [];
-    st.missing.forEach(kind => {
+    const lead = ui.leadAccess;
+    if (lead) st.missing.forEach(kind => {
       const who = st.absent.length ? " " + st.absent.map(esc).join(", ") + (st.absent.length === 1 ? " is" : " are") + " off." : "";
-      let control;
-      if (ui.leadAccess) {
-        control = coverPicker("data-late-pick", "data-late-add", kind, "Add " + kindName[kind] + " cover",
-          day.people.filter(p => !day.away.has(p.name) && p.start < st.start && !committed.has(p.name) && !rolesOf(p).lead && rolesOf(p)[kind]), true);
-      } else {
-        control = `<span class="late-ok">A lead can add cover from Access.</span>`;
-      }
+      const control = coverPicker("data-late-pick", "data-late-add", kind, "Add " + kindName[kind] + " cover",
+        day.people.filter(p => !day.away.has(p.name) && p.start < st.start && !committed.has(p.name) && !rolesOf(p).lead && rolesOf(p)[kind]), true);
       lines.push(`<div class="late-line"><strong>Late shift ${range} needs a ${kindName[kind]} person.</strong>${who} ${control}</div>`);
     });
-    anchorGaps(key).forEach(g => {
+    if (lead) anchorGaps(key).forEach(g => {
       const chosen = anchorCoverFor(g.block)[g.kind];
       const role = g.kind === "late" ? "Late Shift" : "Phase 1";
       if (chosen) {
         lines.push(`<div class="late-line"><span class="late-ok">Anchor shift ${anchorLabel(g)} VIP (${esc(g.person)} is on ${role} this block): covered by <b>${esc(chosen)}</b></span>` +
-          (ui.leadAccess ? `<button type="button" class="ghost" data-anchor-remove="${g.kind}">Remove</button>` : "") + `</div>`);
+          `<button type="button" class="ghost" data-anchor-remove="${g.kind}">Remove</button></div>`);
         return;
       }
-      let control;
-      if (ui.leadAccess) {
-        const blk = vipBlockFor(key) || {};
-        control = coverPicker("data-anchor-pick", "data-anchor-add", g.kind, "Anchor shift cover",
-          day.people.filter(p => !rolesOf(p).lead && rolesOf(p).vip && p.name !== blk.late && p.name !== blk.phase1 && !committed.has(p.name)), false);
-      } else {
-        control = `<span class="late-ok">A lead can add cover from Access.</span>`;
-      }
+      const blk = vipBlockFor(key) || {};
+      const control = coverPicker("data-anchor-pick", "data-anchor-add", g.kind, "Anchor shift cover",
+        day.people.filter(p => !rolesOf(p).lead && rolesOf(p).vip && p.name !== blk.late && p.name !== blk.phase1 && !committed.has(p.name)), false);
       lines.push(`<div class="late-line"><strong>Anchor shift ${anchorLabel(g)} VIP is uncovered.</strong> ${esc(g.person)} is on ${role} this block. Add a VIP rep to work this shift. ${control}</div>`);
     });
-    const pqOff = phaseQueueNeed(day.away, key);
+    const pqOff = lead ? phaseQueueNeed(day.away, key) : null;
     if (pqOff) {
-      let control;
-      if (ui.leadAccess) {
-        control = coverPicker("data-late-pick", "data-late-add", "p1q", "Add Phase 1 cover",
-          day.people.filter(p => !day.away.has(p.name) && !rolesOf(p).lead && rolesOf(p).vip && !committed.has(p.name)), true);
-      } else {
-        control = `<span class="late-ok">A lead can add cover from Access.</span>`;
-      }
+      const control = coverPicker("data-late-pick", "data-late-add", "p1q", "Add Phase 1 cover",
+        day.people.filter(p => !day.away.has(p.name) && !rolesOf(p).lead && rolesOf(p).vip && !committed.has(p.name)), true);
       lines.push(`<div class="late-line"><strong>Phase 1 needs cover.</strong> ${esc(pqOff)} is off. Add a VIP rep to Phase 1. ${control}</div>`);
     }
-    if (ui.leadAccess) {
+    if (lead) {
       if (cover.p1q) lines.push(`<div class="late-line"><span class="late-ok">Phase 1 cover (from VIP): <b>${esc(cover.p1q)}</b></span><button type="button" class="ghost" data-late-remove="p1q">Remove</button></div>`);
       ["vip", "phase1"].forEach(kind => {
         if (!cover[kind]) return;
@@ -4839,35 +4879,29 @@
           `<button type="button" class="ghost" data-late-remove="${kind}">Remove</button></div>`);
       });
     }
-    const infos = [];
-    const rot = lineRotationFor(key);
+    // A Support Line slot whose owner is off and that nobody covers is a job for a lead.
+    const rot = lead ? lineRotationFor(key) : null;
     if (rot) {
       const off = dstSlots(key);
       const slotName = i => slotLabel(LINE_SLOTS[i].start + off) + "–" + slotLabel(LINE_SLOTS[i].start + LINE_SLOTS[i].len + off);
       rot.slots.forEach((owner, i) => {
         if (!owner || !day.away.has(owner)) return;
-        const bar = day.lineBars.find(b => b.backupInfo && b.backupInfo.owner === owner);
-        if (bar) {
-          const bp = bar.owner;
-          const info = bar.backupInfo;
-          const shift = info.to
-            ? `${esc(bp)}'s shift was adjusted to ${slotLabel(info.to[0])}–${slotLabel(info.to[0] + info.to[1])} to cover the Support Line.`
-            : `${esc(bp)}'s shift already covered it.`;
-          infos.push(`<div class="late-line">${esc(owner)} is off. ${esc(bp)} replaced the ${slotName(i)} Support Line slot. ${shift}</div>`);
-        } else if (slotCovered(day.lineBars, day.away, LINE_SLOTS[i].start + off, LINE_SLOTS[i].len)) {
-          const who = [...new Set(day.lineBars.filter(b => !day.away.has(b.owner) && b.start < LINE_SLOTS[i].start + off + LINE_SLOTS[i].len && b.start + b.len > LINE_SLOTS[i].start + off).map(b => b.owner))];
-          infos.push(`<div class="late-line">${esc(owner)} is off. ${who.map(esc).join(", ")} is covering the ${slotName(i)} Support Line slot.</div>`);
-        } else {
-          let why;
-          if (!rot.backup) why = "No backup is listed on the sheet.";
-          else if (day.away.has(rot.backup)) why = `Backup ${esc(rot.backup)} is off too.`;
-          else if (day.lineBars.some(b => b.backupFail && b.owner === owner)) why = `Backup ${esc(rot.backup)} is already covering another slot, and one shift cannot reach both.`;
-          else why = `Backup ${esc(rot.backup)} could not be moved onto that slot.`;
-          lines.push(`<div class="late-line"><strong>Support Line ${slotName(i)} owner ${esc(owner)} is off.</strong> ${why}</div>`);
-        }
+        if (day.lineBars.some(b => b.backupInfo && b.backupInfo.owner === owner)) return;
+        if (slotCovered(day.lineBars, day.away, LINE_SLOTS[i].start + off, LINE_SLOTS[i].len)) return;
+        let why;
+        if (!rot.backup) why = "No backup is listed on the sheet.";
+        else if (day.away.has(rot.backup)) why = `Backup ${esc(rot.backup)} is off too.`;
+        else if (day.lineBars.some(b => b.backupFail && b.owner === owner)) why = `Backup ${esc(rot.backup)} is already covering another slot, and one shift cannot reach both.`;
+        else why = `Backup ${esc(rot.backup)} could not be moved onto that slot.`;
+        lines.push(`<div class="late-line"><strong>Support Line ${slotName(i)} owner ${esc(owner)} is off.</strong> ${why}</div>`);
       });
     }
-    const infoHtml = infos.length ? `<div class="late-info" id="lateInfo">${infos.join("")}</div>` : "";
+    // Everyone sees who is covering whom once cover is arranged.
+    const covers = coveringFor(key, day);
+    const infoHtml = covers.length
+      ? `<div class="late-info" id="lateInfo"><strong>Covering tonight</strong>` + covers.map(e =>
+        `<div class="late-line"><b>${esc(e.name)}</b> is covering ${e.for ? esc(e.for) + " on " : ""}${esc(e.what)}.${e.extra ? " " + esc(e.extra) : ""}</div>`).join("") + `</div>`
+      : "";
     return (lines.length ? `<div class="late-alert" id="lateAlert">${lines.join("")}</div>` : "") + infoHtml;
   }
   function renderDay() {
@@ -5267,7 +5301,10 @@
     bindOooDot(dot, p.name, key);
     shift.appendChild(dot);
     const label = document.createElement("span");
-    label.textContent = shiftBarLabel(p);
+    const cvAll = day._cv || (day._cv = coverByName(coveringFor(key, day)));
+    const cvShift = (cvAll[p.name] || []).filter(e => e.kind !== "line");
+    label.textContent = shiftBarLabel(p) + (cvShift.length ? " (covering)" : "");
+    if (cvShift.length) shift.title = coverTitle(cvShift);
     shift.appendChild(label);
     if (ui.editing) {
       const res = document.createElement("div");
@@ -5305,8 +5342,8 @@
       bar.dataset.hidx = bi;
       bar.style.left = (LABEL_W + b.start * colW) + "px";
       bar.style.width = (b.len * colW) + "px";
-      bar.textContent = "Line " + slotLabel(b.start) + "–" + slotLabel(b.start + b.len) + (b.backupInfo || b.backupMark ? " (backup)" : "");
-      if (b.backupInfo || b.backupMark) bar.title = p.name + " (backup) is covering " + (b.backupInfo ? b.backupInfo.owner : b.backupFor) + "'s Support Line slot.";
+      bar.textContent = "Line " + slotLabel(b.start) + "–" + slotLabel(b.start + b.len) + ((cvAll[p.name] || []).some(e => e.kind === "line") ? " (covering)" : "");
+      if ((cvAll[p.name] || []).some(e => e.kind === "line")) bar.title = coverTitle((cvAll[p.name] || []).filter(e => e.kind === "line"));
       if (b.start < p.start || b.start + b.len > p.start + p.len) {
         bar.style.boxShadow = "0 0 0 2px var(--gap)";
         bar.title = p.name + "'s Support Line duty runs outside their shift (" + slotLabel(p.start) + "–" + slotLabel(p.start + p.len) + "). That time is not counted as line cover.";
@@ -6985,7 +7022,7 @@
       const btn = document.getElementById("attnBtn");
       if (!btn) return;
       const waiting = !teamFirstDone && !hadLocalPlan && !data.updatedAt;
-      const n = waiting ? 0 : attentionItems().length;
+      const n = (waiting || !ui.leadAccess) ? 0 : attentionItems().length;
       btn.classList.toggle("hidden", n === 0);
       const label = n === 1 ? "1 night needs action" : n + " nights need action";
       btn.innerHTML = `<span class="attn-n">${n}</span><span class="attn-t"> ${n === 1 ? "night needs" : "nights need"} action</span>`;
