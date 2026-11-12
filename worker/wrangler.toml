@@ -8,3 +8,7 @@ compatibility_date = "2025-01-01"
 directory = "./public"
 binding = "ASSETS"
 run_worker_first = true
+
+# Role changes made in the app are stored here. Wrangler creates the store on the first deploy.
+[[kv_namespaces]]
+binding = "ROLES"

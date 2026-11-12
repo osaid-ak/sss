@@ -7,6 +7,9 @@ $legacy = '"https://mantledb.sh/v2/sss-e7b1c4a9d2f6/plan"'
 $html = [System.IO.File]::ReadAllText((Resolve-Path $src), [System.Text.Encoding]::UTF8)
 if (-not $html.Contains($legacy)) { throw "Could not find the team plan address in the calendar file." }
 $html = $html.Replace($legacy, '"/api/team/plan"')
+$flag = 'const SSS_GATED = false;'
+if (-not $html.Contains($flag)) { throw "Could not find the SSS_GATED flag in the calendar file." }
+$html = $html.Replace($flag, 'const SSS_GATED = true;')
 New-Item -ItemType Directory -Force (Split-Path $out) | Out-Null
 [System.IO.File]::WriteAllText($out, $html, (New-Object System.Text.UTF8Encoding($false)))
 Push-Location $PSScriptRoot

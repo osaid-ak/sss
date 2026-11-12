@@ -869,6 +869,7 @@
             <button type="button" id="printBtn">Print</button>
             <button type="button" id="viewExportBtn">Export</button>
             <div class="pop-label">Lead tools</div>
+            <button type="button" id="usersBtn" class="hidden">Users</button>
             <button type="button" id="editBtn">Edit schedule</button>
             <button type="button" id="rosterBtn">Edit roster</button>
             <button type="button" id="reviewBtn">Add leave</button>
@@ -909,6 +910,8 @@
   const STORAGE_KEY = "coverage-calendar-v1";
   const TEAM_SYNC_KEY = "coverage-calendar-sync-base";
   const TEAM_PLAN = "https://mantledb.sh/v2/sss-e7b1c4a9d2f6/plan";
+  // Set to true by worker/deploy.ps1. When true the page is served behind the sign-in gate and roles come from the server.
+  const SSS_GATED = false;
   const TEAM_CHUNK = 20000;
   const THEME_KEY = "coverage-calendar-theme";
   const LEAD_PIN = "Theleads";
@@ -1515,6 +1518,9 @@
   let snapshotUi = null;
   let hadLocalPlan = false;
   let teamFirstDone = false;
+  let serverRole = null;
+  let serverEmail = "";
+  function isAdminRole() { return serverRole === "admin" || serverRole === "super"; }
   let openedFromSnapshot = false;
   function load() {
     const embedded = loadEmbedded();
@@ -6275,6 +6281,7 @@
   }
 
   function openModal(kind, leaveName) {
+    if (kind === "pin" && SSS_GATED) return;
     const stackOoo = kind === "ooo" && document.querySelector(".modal.holiday");
     if (stackOoo) document.querySelectorAll(".modal-bg.stack").forEach(el => el.remove());
     else closeModal();
@@ -6746,6 +6753,88 @@
       });
     }
   }
+  async function loadRole() {
+    if (!SSS_GATED) return;
+    let role = null;
+    try {
+      const res = await fetch("/api/me", { cache: "no-store" });
+      if (res.status === 401) { location.reload(); return; }
+      if (!res.ok) throw new Error("me " + res.status);
+      const me = await res.json();
+      role = me.role;
+      serverEmail = me.email || "";
+    } catch (_) {
+      if (serverRole) return;
+      role = "member";
+    }
+    if (role === serverRole) return;
+    serverRole = role;
+    ui.leadAccess = isAdminRole();
+    if (!ui.leadAccess) { ui.editing = false; ui.accessOpen = false; }
+    render();
+  }
+  async function openUsersPanel() {
+    const old = document.getElementById("usersBg");
+    if (old) old.remove();
+    const bg = document.createElement("div");
+    bg.className = "modal-bg";
+    bg.id = "usersBg";
+    const box = document.createElement("div");
+    box.className = "card modal";
+    bg.appendChild(box);
+    bg.addEventListener("click", e => { if (e.target === bg) bg.remove(); });
+    document.body.appendChild(bg);
+    const label = { super: "Super Admin", admin: "Admin", member: "Member" };
+    const paint = (users, editable, note) => {
+      const rows = users.map(u => {
+        const mine = u.email === serverEmail;
+        const locked = !editable || u.role === "super" || mine || (u.role === "admin" && serverRole !== "super");
+        const control = u.role === "super"
+          ? `<b>${label.super}</b>`
+          : `<select data-user-role="${esc(u.email)}"${locked ? " disabled" : ""}>` +
+            `<option value="member"${u.role === "member" ? " selected" : ""}>Member</option>` +
+            `<option value="admin"${u.role === "admin" ? " selected" : ""}>Admin</option></select>`;
+        return `<tr><td style="padding:6px 10px 6px 0">${esc(u.email)}${mine ? " (you)" : ""}</td><td style="padding:6px 0">${control}</td></tr>`;
+      }).join("");
+      box.innerHTML = `<h2>Users</h2>
+        <p>Admins have lead access. Members can view the calendar only. ${serverRole === "super" ? "You can change any role." : "Only the Super Admin can change an Admin."}</p>
+        ${editable ? "" : `<p class="pin-err">Role changes are not set up yet (see the worker README).</p>`}
+        ${note ? `<p class="pin-err">${esc(note)}</p>` : ""}
+        <table style="border-collapse:collapse;width:100%">${rows}</table>
+        <div class="modal-actions"><button type="button" class="ghost" id="usersClose">Close</button></div>`;
+      box.querySelector("#usersClose").addEventListener("click", () => bg.remove());
+      box.querySelectorAll("[data-user-role]").forEach(sel => {
+        sel.addEventListener("change", async () => {
+          sel.disabled = true;
+          try {
+            const res = await fetch("/api/users", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email: sel.dataset.userRole, role: sel.value })
+            });
+            const out = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(out.error || "Could not change that role.");
+            paint(out.users, true, "");
+          } catch (err) {
+            load(err && err.message ? err.message : "Could not change that role.");
+          }
+        });
+      });
+    };
+    const load = async note => {
+      try {
+        const res = await fetch("/api/users", { cache: "no-store" });
+        if (!res.ok) throw new Error("Could not load the user list.");
+        const out = await res.json();
+        paint(out.users, out.editable, note || "");
+      } catch (err) {
+        box.innerHTML = `<h2>Users</h2><p class="pin-err">${esc(err.message || "Could not load the user list.")}</p><div class="modal-actions"><button type="button" class="ghost" id="usersClose">Close</button></div>`;
+        box.querySelector("#usersClose").addEventListener("click", () => bg.remove());
+      }
+    };
+    box.innerHTML = "<h2>Users</h2><p>Loading…</p>";
+    load("");
+  }
   function closeModal() {
     ui.modal = null;
     ui.leaveName = null;
@@ -6858,6 +6947,13 @@
   function renderChrome() {
     const yearBtn = document.querySelector('#viewTabs [data-view="year"]');
     if (yearBtn) yearBtn.classList.toggle("hidden", !ui.leadAccess);
+    if (SSS_GATED) {
+      // Members get no Access button at all; Admins are unlocked by their role, so there is no PIN and nothing to lock.
+      document.getElementById("accessBtn").classList.toggle("hidden", !isAdminRole());
+      document.getElementById("usersBtn").classList.toggle("hidden", !isAdminRole());
+      document.getElementById("lockAccessBtn").classList.add("hidden");
+      if (!isAdminRole()) ui.accessOpen = false;
+    }
     document.querySelectorAll("#viewTabs button").forEach(b => b.classList.toggle("on", b.dataset.view === ui.view));
     document.getElementById("accessMenu").classList.toggle("hidden", !ui.accessOpen);
     document.getElementById("themeMenu").classList.toggle("hidden", !ui.themeOpen);
@@ -6889,6 +6985,10 @@
   applyTheme((function () { try { return localStorage.getItem(THEME_KEY); } catch (_) { return "night"; } })());
   applySnapshotUi();
 
+  document.getElementById("usersBtn").addEventListener("click", () => {
+    closePops();
+    openUsersPanel();
+  });
   document.getElementById("editBtn").addEventListener("click", () => {
     ui.editing = !ui.editing;
     render();
@@ -7023,6 +7123,10 @@
   if (openedFromSnapshot) setTeamStatus("Snapshot");
   else startTeamSync();
   startWeekendAutoSync();
+  if (SSS_GATED) {
+    loadRole();
+    setInterval(() => { if (document.visibilityState === "visible") loadRole(); }, 60000);
+  }
 })();
 </script>
 </body>

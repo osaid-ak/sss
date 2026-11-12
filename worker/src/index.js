@@ -1,16 +1,21 @@
-// Shift Plan gate: Intercom sign-in in front of the calendar and the shared plan.
+// Shift Plan gate: Google sign-in in front of the calendar and the shared plan, with Member / Admin roles.
 //
 // Routes
-//   /auth/login     start "Sign in with Intercom" (OAuth)
-//   /auth/callback  Intercom sends the person back here; we check their email against ALLOWED_EMAILS
+//   /auth/login     start "Sign in with Google" (OAuth, email only)
+//   /auth/callback  Google sends the person back here; we check their email against ALLOWED_EMAILS
 //   /auth/logout    clear the session
+//   /api/me         who am I and my role
+//   /api/users      Admins: list people and roles (GET) / change a role (POST)
 //   /api/team/*     the shared team plan (proxied to PLAN_BASE, signed-in people only)
 //   everything else the calendar page (static asset, signed-in people only)
 //
 // Secrets (set with `wrangler secret put`, never committed):
-//   INTERCOM_CLIENT_ID, INTERCOM_CLIENT_SECRET, SESSION_SECRET, ALLOWED_EMAILS, PLAN_BASE
-// ALLOWED_EMAILS is a comma-separated list. It is re-read on every request, so removing an email
-// locks that person out immediately, even if they already have a session.
+//   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SESSION_SECRET, PLAN_BASE
+//   ALLOWED_EMAILS  comma-separated: everyone who may sign in
+//   ADMIN_EMAILS    comma-separated: who starts as an Admin (everyone else starts as a Member)
+//   SUPER_ADMIN     one email: always allowed, always the Super Admin, can change Admins' roles
+// Role changes made in the app are kept in the ROLES key-value store and win over ADMIN_EMAILS.
+// ALLOWED_EMAILS is re-read on every request, so removing an email locks that person out immediately.
 
 const SESSION_COOKIE = "sss_session";
 const STATE_COOKIE = "sss_state";
@@ -56,11 +61,30 @@ function cookies(request) {
 function cookie(name, value, maxAge) {
   return `${name}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 }
+
+function emailList(value) {
+  return String(value || "").split(",").map(x => x.trim().toLowerCase()).filter(Boolean);
+}
+function superEmail(env) { return String(env.SUPER_ADMIN || "").trim().toLowerCase(); }
 function allowed(env, email) {
   if (!email) return false;
-  const list = String(env.ALLOWED_EMAILS || "").split(",").map(x => x.trim().toLowerCase()).filter(Boolean);
-  return list.includes(String(email).trim().toLowerCase());
+  const e = String(email).trim().toLowerCase();
+  return e === superEmail(env) || emailList(env.ALLOWED_EMAILS).includes(e);
 }
+async function storedRoles(env) {
+  if (!env.ROLES) return {};
+  try { return JSON.parse((await env.ROLES.get("roles")) || "{}") || {}; } catch (e) { return {}; }
+}
+// "super", "admin" or "member"
+async function roleOf(env, email, stored) {
+  const e = String(email).trim().toLowerCase();
+  if (e === superEmail(env)) return "super";
+  const roles = stored || await storedRoles(env);
+  if (roles[e] === "admin") return "admin";
+  if (roles[e] === "member") return "member";
+  return emailList(env.ADMIN_EMAILS).includes(e) ? "admin" : "member";
+}
+
 async function sessionEmail(request, env) {
   const raw = cookies(request)[SESSION_COOKIE];
   if (!raw || !env.SESSION_SECRET) return null;
@@ -82,20 +106,29 @@ function page(title, body, status) {
   return new Response(html, { status: status || 200, headers: Object.assign({ "Content-Type": "text/html; charset=utf-8" }, HEADERS) });
 }
 function landing() {
-  return page("Shift Plan", `<h1>Shift Plan</h1><p>Sign in with your Intercom account to open the calendar.</p><a class="btn" href="/auth/login">Sign in with Intercom</a>`, 200);
+  return page("Shift Plan", `<h1>Shift Plan</h1><p>Sign in with your Google account to open the calendar.</p><a class="btn" href="/auth/login">Sign in with Google</a>`, 200);
 }
 function denied() {
-  return page("Not allowed", `<h1>Not allowed</h1><p>This Intercom account does not have access to the calendar. Ask a lead to add your email.</p><a class="btn" href="/auth/logout">Try another account</a>`, 403);
+  return page("Not allowed", `<h1>Not allowed</h1><p>This Google account does not have access to the calendar. Ask a lead to add your email.</p><a class="btn" href="/auth/login">Try another account</a>`, 403);
+}
+function failed(message) {
+  return page("Sign-in failed", `<h1>Sign-in failed</h1><p>${message}</p><a class="btn" href="/auth/login">Try again</a>`, 400);
+}
+function json(body, status) {
+  return new Response(JSON.stringify(body), { status: status || 200, headers: Object.assign({ "Content-Type": "application/json" }, HEADERS) });
 }
 
 async function login(request, env) {
   const url = new URL(request.url);
   const nonce = b64url(crypto.getRandomValues(new Uint8Array(24)));
   const state = await sign(nonce, env.SESSION_SECRET);
-  const target = "https://app.intercom.com/oauth?" + new URLSearchParams({
-    client_id: env.INTERCOM_CLIENT_ID,
+  const target = "https://accounts.google.com/o/oauth2/v2/auth?" + new URLSearchParams({
+    client_id: env.GOOGLE_CLIENT_ID,
+    redirect_uri: url.origin + "/auth/callback",
+    response_type: "code",
+    scope: "openid email",
     state,
-    redirect_uri: url.origin + "/auth/callback"
+    prompt: "select_account"
   });
   return new Response(null, { status: 302, headers: Object.assign({ Location: target, "Set-Cookie": cookie(STATE_COOKIE, state, 600) }, HEADERS) });
 }
@@ -106,22 +139,27 @@ async function callback(request, env) {
   const state = url.searchParams.get("state");
   const saved = cookies(request)[STATE_COOKIE];
   if (!code || !state || !saved || state !== saved || !(await unsign(state, env.SESSION_SECRET))) {
-    return page("Sign-in failed", `<h1>Sign-in failed</h1><p>The sign-in link expired or was not started here.</p><a class="btn" href="/auth/login">Try again</a>`, 400);
+    return failed("The sign-in link expired or was not started here.");
   }
-  const tokenRes = await fetch("https://api.intercom.io/auth/eagle/token", {
+  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ code, client_id: env.INTERCOM_CLIENT_ID, client_secret: env.INTERCOM_CLIENT_SECRET })
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      code,
+      client_id: env.GOOGLE_CLIENT_ID,
+      client_secret: env.GOOGLE_CLIENT_SECRET,
+      redirect_uri: url.origin + "/auth/callback",
+      grant_type: "authorization_code"
+    })
   });
-  if (!tokenRes.ok) return page("Sign-in failed", `<h1>Sign-in failed</h1><p>Intercom did not accept the sign-in.</p><a class="btn" href="/auth/login">Try again</a>`, 400);
+  if (!tokenRes.ok) return failed("Google did not accept the sign-in.");
   const tokenBody = await tokenRes.json();
-  const token = tokenBody && tokenBody.token;
-  if (!token) return page("Sign-in failed", `<h1>Sign-in failed</h1><p>Intercom did not return a sign-in.</p><a class="btn" href="/auth/login">Try again</a>`, 400);
-  const meRes = await fetch("https://api.intercom.io/me", { headers: { Authorization: "Bearer " + token, Accept: "application/json" } });
-  if (!meRes.ok) return page("Sign-in failed", `<h1>Sign-in failed</h1><p>Could not read your Intercom profile.</p><a class="btn" href="/auth/login">Try again</a>`, 400);
+  if (!tokenBody || !tokenBody.access_token) return failed("Google did not return a sign-in.");
+  const meRes = await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { Authorization: "Bearer " + tokenBody.access_token } });
+  if (!meRes.ok) return failed("Could not read your Google email.");
   const me = await meRes.json();
-  // The Intercom token is not kept: it was only needed to learn who signed in.
-  if (!allowed(env, me && me.email)) {
+  // The Google token is not kept: it was only needed to learn who signed in.
+  if (!me || me.email_verified !== true || !allowed(env, me.email)) {
     return new Response(denied().body, { status: 403, headers: Object.assign({ "Content-Type": "text/html; charset=utf-8", "Set-Cookie": cookie(STATE_COOKIE, "", 0) }, HEADERS) });
   }
   const payload = b64url(enc.encode(JSON.stringify({ e: String(me.email).toLowerCase(), x: Date.now() + SESSION_DAYS * 86400000 })));
@@ -130,6 +168,35 @@ async function callback(request, env) {
   headers.append("Set-Cookie", cookie(SESSION_COOKIE, await sign(payload, env.SESSION_SECRET), SESSION_DAYS * 86400));
   headers.append("Set-Cookie", cookie(STATE_COOKIE, "", 0));
   return new Response(null, { status: 302, headers });
+}
+
+const RANK = { super: 0, admin: 1, member: 2 };
+async function listUsers(env) {
+  const stored = await storedRoles(env);
+  const emails = [...new Set([superEmail(env), ...emailList(env.ALLOWED_EMAILS)].filter(Boolean))];
+  const users = [];
+  for (const email of emails) users.push({ email, role: await roleOf(env, email, stored) });
+  users.sort((a, b) => (RANK[a.role] - RANK[b.role]) || a.email.localeCompare(b.email));
+  return users;
+}
+
+async function changeRole(request, env, actorEmail) {
+  const actor = await roleOf(env, actorEmail);
+  if (actor !== "admin" && actor !== "super") return json({ error: "admins only" }, 403);
+  if (!env.ROLES) return json({ error: "role storage is not set up" }, 501);
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ error: "bad request" }, 400); }
+  const target = String((body && body.email) || "").trim().toLowerCase();
+  const role = body && body.role;
+  if (!allowed(env, target)) return json({ error: "unknown person" }, 404);
+  if (role !== "admin" && role !== "member") return json({ error: "role must be admin or member" }, 400);
+  const stored = await storedRoles(env);
+  const current = await roleOf(env, target, stored);
+  if (current === "super") return json({ error: "The Super Admin role cannot be changed." }, 403);
+  if (current === "admin" && actor !== "super") return json({ error: "Only the Super Admin can change an Admin role." }, 403);
+  stored[target] = role;
+  await env.ROLES.put("roles", JSON.stringify(stored));
+  return json({ ok: true, users: await listUsers(env) });
 }
 
 async function proxyPlan(request, env, rest) {
@@ -150,7 +217,7 @@ async function proxyPlan(request, env, rest) {
 
 export default {
   async fetch(request, env) {
-    if (!env.SESSION_SECRET || !env.INTERCOM_CLIENT_ID || !env.INTERCOM_CLIENT_SECRET) {
+    if (!env.SESSION_SECRET || !env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
       return page("Not set up", `<h1>Not set up yet</h1><p>The sign-in settings are missing.</p>`, 503);
     }
     const url = new URL(request.url);
@@ -166,7 +233,18 @@ export default {
     }
     const email = await sessionEmail(request, env);
     if (path.startsWith("/api/")) {
-      if (!email) return new Response(JSON.stringify({ error: "sign in required" }), { status: 401, headers: Object.assign({ "Content-Type": "application/json" }, HEADERS) });
+      if (!email) return json({ error: "sign in required" }, 401);
+      // Writes must come from our own page.
+      const origin = request.headers.get("Origin");
+      if (request.method !== "GET" && origin && origin !== url.origin) return json({ error: "bad origin" }, 403);
+      if (path === "/api/me") return json({ email, role: await roleOf(env, email) });
+      if (path === "/api/users") {
+        const role = await roleOf(env, email);
+        if (role !== "admin" && role !== "super") return json({ error: "admins only" }, 403);
+        if (request.method === "GET") return json({ users: await listUsers(env), editable: !!env.ROLES });
+        if (request.method === "POST") return changeRole(request, env, email);
+        return json({ error: "method not allowed" }, 405);
+      }
       if (path.startsWith("/api/team/")) return proxyPlan(request, env, path.slice("/api/team/".length));
       return new Response("Not found", { status: 404, headers: HEADERS });
     }
