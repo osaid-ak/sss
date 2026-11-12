@@ -6916,15 +6916,40 @@
       const res = await fetch("/api/log", { cache: "no-store" });
       if (!res.ok) throw new Error("Could not load the activity log.");
       const out = await res.json();
-      const rows = (out.log || []).map(e => {
+      const entries = (out.log || []).map(e => {
         const when = new Date(e.t);
-        const stamp = isNaN(when) ? esc(e.t) : esc(when.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }));
-        const more = [e.detail, e.ip, logBrowser(e.ua), e.country].filter(Boolean).map(esc).join(" · ");
-        return `<div class="log-row" title="${esc(e.ua || "")}"><span>${stamp}</span><span${/refused/.test(e.event) ? ' class="log-bad"' : ""}>${esc(e.event)}</span>` +
+        const stamp = isNaN(when) ? String(e.t) : when.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+        const browser = logBrowser(e.ua);
+        const more = [e.detail, e.ip, browser, e.country].filter(Boolean).map(esc).join(" · ");
+        const html = `<div class="log-row" title="${esc(e.ua || "")}"><span>${esc(stamp)}</span><span${/refused/.test(e.event) ? ' class="log-bad"' : ""}>${esc(e.event)}</span>` +
           `<span class="log-who" title="${esc(e.email)}">${esc(e.email)}</span>${more ? `<span class="log-more">${more}</span>` : ""}</div>`;
-      }).join("");
-      shell(`<p>The latest ${out.kept} sign-ins, sign-outs and user changes, newest first. Times are in your time zone.</p>` +
-        (rows ? `<div class="modal-scroll">${rows}</div>` : "<p>Nothing recorded yet.</p>"));
+        // Everything that can appear in the row is searchable: the time as shown and as ISO, event, email, detail, IP, browser, country.
+        const hay = [stamp, e.t, e.event, e.email, e.detail, e.ip, browser, e.ua, e.country].filter(Boolean).join(" ").toLowerCase();
+        return { html, hay };
+      });
+      if (!entries.length) {
+        shell("<p>Nothing recorded yet.</p>");
+        return;
+      }
+      shell(`<p>The latest ${out.kept} sign-ins, sign-outs and user changes, newest first. Times are in your time zone.</p>
+        <input id="logSearch" type="search" placeholder="Search email, event, IP, browser, date…" autocomplete="off" aria-label="Search the activity log" style="margin:0 0 8px">
+        <div class="saved-note" id="logCount" style="margin:0 0 6px"></div>
+        <div class="modal-scroll" id="logList"></div>`);
+      const input = box.querySelector("#logSearch");
+      const list = box.querySelector("#logList");
+      const count = box.querySelector("#logCount");
+      // Filtering starts at 2 characters. Several words must all match, in any order.
+      const paintLog = () => {
+        const q = input.value.trim().toLowerCase();
+        const terms = q.length >= 2 ? q.split(/\s+/).filter(Boolean) : [];
+        const shown = terms.length ? entries.filter(en => terms.every(t => en.hay.indexOf(t) >= 0)) : entries;
+        list.innerHTML = shown.length ? shown.map(en => en.html).join("") : `<p style="padding:10px 0">No entries match “${esc(input.value.trim())}”.</p>`;
+        count.textContent = terms.length ? shown.length + " of " + entries.length + " entries" : entries.length + " entries";
+        list.scrollTop = 0;
+      };
+      input.addEventListener("input", paintLog);
+      paintLog();
+      input.focus();
     } catch (err) {
       shell(`<p class="pin-err">${esc(err.message || "Could not load the activity log.")}</p>`);
     }
