@@ -125,6 +125,18 @@ check("Super Admin can remove an admin", (await (await post("/api/users", boss.s
 check("a removed secret-list person is locked out", (await get("/api/team/plan", (await signIn("bob@example.com")).session)).status === 200 && (await (await post("/api/users", boss.session, { action: "remove", email: "bob@example.com" })).json()).ok && (await signIn("bob@example.com")).res.status === 403);
 check("a removed person can be added back", (await (await post("/api/users", boss.session, { action: "add", email: "bob@example.com", role: "member" })).json()).ok && (await signIn("bob@example.com")).session);
 
+// 5c. activity log
+const logRes = await (await get("/api/log", ann.session)).json();
+const events = logRes.log.map(e => e.event);
+check("log records sign-ins", events.includes("sign-in"));
+check("log records refused sign-ins", logRes.log.some(e => e.event === "sign-in refused" && e.email === "eve@example.com"));
+check("log records user changes with who did it", logRes.log.some(e => e.event === "user added" && e.email === "ann@example.com" && /new@example.com/.test(e.detail)));
+check("log is newest first", logRes.log[0].t >= logRes.log[logRes.log.length - 1].t);
+check("log never stores IP or browser", !JSON.stringify(logRes.log).match(/user-agent|\d+\.\d+\.\d+\.\d+/i));
+check("member cannot read the log", (await get("/api/log", bob.session)).status === 403);
+await get("/auth/logout", ann.session);
+check("sign-out is logged", (await (await get("/api/log", boss.session)).json()).log.some(e => e.event === "sign-out" && e.email === "ann@example.com"));
+
 // 6. removing someone locks them out at once
 const saved = env.ALLOWED_EMAILS;
 env.ALLOWED_EMAILS = "ann@example.com";

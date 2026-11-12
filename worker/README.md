@@ -39,6 +39,10 @@ The old page at https://osaid-ak.github.io/sss/ and the old plan address are pub
 
 `npx wrangler@4 secret put ALLOWED_EMAILS` (or `ADMIN_EMAILS`) with the new list. It takes effect on the next request, and removed people are locked out even if already signed in. Role changes made in the app are stored separately and win over `ADMIN_EMAILS`. Sessions last 7 days.
 
+## Activity log
+
+Admins and the Super Admin see the latest 500 sign-ins, refused sign-ins, sign-outs and user changes under Access -> Activity log. Only email, event, time and country are recorded, not IP addresses or browsers. Sessions are signed cookies that last 7 days; to cut someone off at once, remove them in the Users panel.
+
 ## Limits
 
 - Admin and Member are enforced by the server for the user list and role changes. Inside the calendar, lead tools follow the role, but a Member's browser can still send schedule edits to the shared plan, because Members must be able to sync it.

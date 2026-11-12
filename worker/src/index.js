@@ -5,7 +5,8 @@
 //   /auth/callback  Google sends the person back here; we check their email against ALLOWED_EMAILS
 //   /auth/logout    clear the session
 //   /api/me         who am I and my role
-//   /api/users      Admins: list people and roles (GET) / change a role (POST)
+//   /api/users      Admins: list people (GET) / add, remove, change a role (POST)
+//   /api/log        Admins: recent sign-ins, sign-outs and user changes
 //   /api/team/*     the shared team plan (proxied to PLAN_BASE, signed-in people only)
 //   everything else the calendar page (static asset, signed-in people only)
 //
@@ -99,6 +100,24 @@ async function roleOf(env, email, stored) {
   return emailList(env.ADMIN_EMAILS).includes(e) ? "admin" : "member";
 }
 
+// Activity log: sign-ins, refused sign-ins, sign-outs and user changes. Newest 500 are kept in the ROLES store.
+// Only the email, the event, the time and the country are recorded. IP addresses and browsers are not.
+const LOG_KEEP = 500;
+async function logEvent(env, request, event, email, detail) {
+  if (!env.ROLES) return;
+  try {
+    let list = [];
+    try { list = JSON.parse((await env.ROLES.get("log")) || "[]") || []; } catch (e) { list = []; }
+    const entry = { t: new Date().toISOString(), event, email: String(email || "").toLowerCase() };
+    if (detail) entry.detail = detail;
+    const country = request && request.headers.get("CF-IPCountry");
+    if (country) entry.country = country;
+    list.push(entry);
+    if (list.length > LOG_KEEP) list = list.slice(list.length - LOG_KEEP);
+    await env.ROLES.put("log", JSON.stringify(list));
+  } catch (e) { /* logging must never break sign-in */ }
+}
+
 async function sessionEmail(request, env) {
   const raw = cookies(request)[SESSION_COOKIE];
   if (!raw || !env.SESSION_SECRET) return null;
@@ -174,9 +193,11 @@ async function callback(request, env) {
   const me = await meRes.json();
   // The Google token is not kept: it was only needed to learn who signed in.
   if (!me || me.email_verified !== true || !(await isAllowed(env, me.email))) {
+    await logEvent(env, request, "sign-in refused", me && me.email, me && me.email_verified !== true ? "email not verified" : "not on the list");
     return new Response(denied().body, { status: 403, headers: Object.assign({ "Content-Type": "text/html; charset=utf-8", "Set-Cookie": cookie(STATE_COOKIE, "", 0) }, HEADERS) });
   }
   const payload = b64url(enc.encode(JSON.stringify({ e: String(me.email).toLowerCase(), x: Date.now() + SESSION_DAYS * 86400000 })));
+  await logEvent(env, request, "sign-in", me.email);
   const headers = new Headers(HEADERS);
   headers.set("Location", "/");
   headers.append("Set-Cookie", cookie(SESSION_COOKIE, await sign(payload, env.SESSION_SECRET), SESSION_DAYS * 86400));
@@ -217,6 +238,7 @@ async function userAction(request, env, actorEmail) {
     stored[target] = role;
     await env.ROLES.put("users", JSON.stringify(users));
     await env.ROLES.put("roles", JSON.stringify(stored));
+    await logEvent(env, request, "user added", actorEmail, target + " as " + role);
     return json({ ok: true, users: await listUsers(env) });
   }
 
@@ -232,12 +254,14 @@ async function userAction(request, env, actorEmail) {
     delete stored[target];
     await env.ROLES.put("users", JSON.stringify(users));
     await env.ROLES.put("roles", JSON.stringify(stored));
+    await logEvent(env, request, "user removed", actorEmail, target);
     return json({ ok: true, users: await listUsers(env) });
   }
 
   if (role !== "admin" && role !== "member") return json({ error: "role must be admin or member" }, 400);
   stored[target] = role;
   await env.ROLES.put("roles", JSON.stringify(stored));
+  await logEvent(env, request, "role changed", actorEmail, target + " to " + role);
   return json({ ok: true, users: await listUsers(env) });
 }
 
@@ -267,6 +291,8 @@ export default {
     if (path === "/auth/login") return login(request, env);
     if (path === "/auth/callback") return callback(request, env);
     if (path === "/auth/logout") {
+      const who = await sessionEmail(request, env);
+      if (who) await logEvent(env, request, "sign-out", who);
       const headers = new Headers(HEADERS);
       headers.set("Location", "/");
       headers.append("Set-Cookie", cookie(SESSION_COOKIE, "", 0));
@@ -286,6 +312,13 @@ export default {
         if (request.method === "GET") return json({ users: await listUsers(env), editable: !!env.ROLES });
         if (request.method === "POST") return userAction(request, env, email);
         return json({ error: "method not allowed" }, 405);
+      }
+      if (path === "/api/log") {
+        const role = await roleOf(env, email);
+        if (role !== "admin" && role !== "super") return json({ error: "admins only" }, 403);
+        let list = [];
+        if (env.ROLES) { try { list = JSON.parse((await env.ROLES.get("log")) || "[]") || []; } catch (e) { list = []; } }
+        return json({ log: list.slice().reverse(), kept: LOG_KEEP });
       }
       if (path.startsWith("/api/team/")) return proxyPlan(request, env, path.slice("/api/team/".length));
       return new Response("Not found", { status: 404, headers: HEADERS });

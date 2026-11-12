@@ -870,6 +870,7 @@
             <button type="button" id="viewExportBtn">Export</button>
             <div class="pop-label">Lead tools</div>
             <button type="button" id="usersBtn" class="hidden">Users</button>
+            <button type="button" id="logBtn" class="hidden">Activity log</button>
             <button type="button" id="editBtn">Edit schedule</button>
             <button type="button" id="rosterBtn">Edit roster</button>
             <button type="button" id="reviewBtn">Add leave</button>
@@ -6862,6 +6863,39 @@
     box.innerHTML = "<h2>Users</h2><p>Loading…</p>";
     load("");
   }
+  async function openLogPanel() {
+    const old = document.getElementById("logBg");
+    if (old) old.remove();
+    const bg = document.createElement("div");
+    bg.className = "modal-bg";
+    bg.id = "logBg";
+    const box = document.createElement("div");
+    box.className = "card modal wide";
+    bg.appendChild(box);
+    bg.addEventListener("click", e => { if (e.target === bg) bg.remove(); });
+    document.body.appendChild(bg);
+    const shell = inner => {
+      box.innerHTML = `<h2>Activity log</h2>${inner}<div class="modal-actions"><button type="button" class="ghost" id="logClose">Close</button></div>`;
+      box.querySelector("#logClose").addEventListener("click", () => bg.remove());
+    };
+    shell("<p>Loading…</p>");
+    try {
+      const res = await fetch("/api/log", { cache: "no-store" });
+      if (!res.ok) throw new Error("Could not load the activity log.");
+      const out = await res.json();
+      const rows = (out.log || []).map(e => {
+        const when = new Date(e.t);
+        const stamp = isNaN(when) ? esc(e.t) : esc(when.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }));
+        const bad = /refused/.test(e.event) ? ' style="color:var(--gap)"' : "";
+        return `<tr><td style="padding:4px 10px 4px 0;white-space:nowrap">${stamp}</td><td style="padding:4px 10px 4px 0"${bad}>${esc(e.event)}</td>` +
+          `<td style="padding:4px 10px 4px 0">${esc(e.email)}</td><td style="padding:4px 0;color:var(--muted)">${esc(e.detail || "")}${e.country ? " · " + esc(e.country) : ""}</td></tr>`;
+      }).join("");
+      shell(`<p>The latest ${out.kept} sign-ins, sign-outs and user changes, newest first. Times are in your time zone.</p>` +
+        (rows ? `<div style="max-height:60vh;overflow:auto"><table style="border-collapse:collapse;width:100%;font-size:13px">${rows}</table></div>` : "<p>Nothing recorded yet.</p>"));
+    } catch (err) {
+      shell(`<p class="pin-err">${esc(err.message || "Could not load the activity log.")}</p>`);
+    }
+  }
   function closeModal() {
     ui.modal = null;
     ui.leaveName = null;
@@ -6983,6 +7017,7 @@
       // Members get no Access button at all; Admins are unlocked by their role, so there is no PIN and nothing to lock.
       document.getElementById("accessBtn").classList.toggle("hidden", !isAdminRole());
       document.getElementById("usersBtn").classList.toggle("hidden", !isAdminRole());
+      document.getElementById("logBtn").classList.toggle("hidden", !isAdminRole());
       document.getElementById("lockAccessBtn").classList.add("hidden");
       if (!isAdminRole()) ui.accessOpen = false;
     }
@@ -7017,6 +7052,10 @@
   applyTheme((function () { try { return localStorage.getItem(THEME_KEY); } catch (_) { return "night"; } })());
   applySnapshotUi();
 
+  document.getElementById("logBtn").addEventListener("click", () => {
+    closePops();
+    openLogPanel();
+  });
   document.getElementById("usersBtn").addEventListener("click", () => {
     closePops();
     openUsersPanel();
