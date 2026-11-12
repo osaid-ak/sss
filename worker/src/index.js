@@ -101,7 +101,7 @@ async function roleOf(env, email, stored) {
 }
 
 // Activity log: sign-ins, refused sign-ins, sign-outs and user changes. Newest 500 are kept in the ROLES store.
-// Only the email, the event, the time and the country are recorded. IP addresses and browsers are not.
+// Each entry holds the email, the event, the time, the country, the IP address and the browser (User-Agent, shortened).
 const LOG_KEEP = 500;
 async function logEvent(env, request, event, email, detail) {
   if (!env.ROLES) return;
@@ -112,6 +112,10 @@ async function logEvent(env, request, event, email, detail) {
     if (detail) entry.detail = detail;
     const country = request && request.headers.get("CF-IPCountry");
     if (country) entry.country = country;
+    const ip = request && request.headers.get("CF-Connecting-IP");
+    if (ip) entry.ip = ip;
+    const ua = request && request.headers.get("User-Agent");
+    if (ua) entry.ua = ua.slice(0, 200);
     list.push(entry);
     if (list.length > LOG_KEEP) list = list.slice(list.length - LOG_KEEP);
     await env.ROLES.put("log", JSON.stringify(list));

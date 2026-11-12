@@ -41,7 +41,7 @@ The old page at https://osaid-ak.github.io/sss/ and the old plan address are pub
 
 ## Activity log
 
-Admins and the Super Admin see the latest 500 sign-ins, refused sign-ins, sign-outs and user changes under Access -> Activity log. Only email, event, time and country are recorded, not IP addresses or browsers. Sessions are signed cookies that last 7 days; to cut someone off at once, remove them in the Users panel.
+Admins and the Super Admin see the latest 500 sign-ins, refused sign-ins, sign-outs and user changes under Access -> Activity log. Each entry has the email, event, time, country, IP address and browser, so sign-ins from a future mobile app can be told apart. Let the team know these are recorded. Sessions are signed cookies that last 7 days; to cut someone off at once, remove them in the Users panel.
 
 ## Limits
 

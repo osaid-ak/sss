@@ -6889,6 +6889,13 @@
     box.innerHTML = "<h2>Users</h2><p>Loading…</p>";
     load("");
   }
+  // A short, readable browser label from a User-Agent string; the full string is in the row's hover text.
+  function logBrowser(ua) {
+    if (!ua) return "";
+    const b = /Edg\//.test(ua) ? "Edge" : /OPR\/|Opera/.test(ua) ? "Opera" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : /okhttp|CFNetwork|Dart|Expo|ReactNative/i.test(ua) ? "App" : "Other browser";
+    const o = /Windows/.test(ua) ? "Windows" : /Android/.test(ua) ? "Android" : /iPhone|iPad|iOS/.test(ua) ? "iOS" : /Mac OS X|Macintosh/.test(ua) ? "macOS" : /Linux/.test(ua) ? "Linux" : "";
+    return o ? b + " on " + o : b;
+  }
   async function openLogPanel() {
     const old = document.getElementById("logBg");
     if (old) old.remove();
@@ -6912,8 +6919,8 @@
       const rows = (out.log || []).map(e => {
         const when = new Date(e.t);
         const stamp = isNaN(when) ? esc(e.t) : esc(when.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }));
-        const more = [e.detail, e.country].filter(Boolean).map(esc).join(" · ");
-        return `<div class="log-row"><span>${stamp}</span><span${/refused/.test(e.event) ? ' class="log-bad"' : ""}>${esc(e.event)}</span>` +
+        const more = [e.detail, e.ip, logBrowser(e.ua), e.country].filter(Boolean).map(esc).join(" · ");
+        return `<div class="log-row" title="${esc(e.ua || "")}"><span>${stamp}</span><span${/refused/.test(e.event) ? ' class="log-bad"' : ""}>${esc(e.event)}</span>` +
           `<span class="log-who" title="${esc(e.email)}">${esc(e.email)}</span>${more ? `<span class="log-more">${more}</span>` : ""}</div>`;
       }).join("");
       shell(`<p>The latest ${out.kept} sign-ins, sign-outs and user changes, newest first. Times are in your time zone.</p>` +
