@@ -13,4 +13,6 @@ $html = $html.Replace($flag, 'const SSS_GATED = true;')
 New-Item -ItemType Directory -Force (Split-Path $out) | Out-Null
 [System.IO.File]::WriteAllText($out, $html, (New-Object System.Text.UTF8Encoding($false)))
 Push-Location $PSScriptRoot
-try { npx --yes wrangler@4 deploy } finally { Pop-Location }
+# A new BUILD_ID on every deploy signs everyone out, so nobody keeps a session from an older version.
+$build = (Get-Date).ToUniversalTime().ToString("yyyyMMddHHmmss")
+try { npx --yes wrangler@4 deploy --var "BUILD_ID:$build" } finally { Pop-Location }

@@ -229,6 +229,8 @@ async function sessionEmail(request, env) {
   let data;
   try { data = JSON.parse(new TextDecoder().decode(b64urlDecode(value))); } catch (e) { return null; }
   if (!data || !data.e || !data.x || data.x < Date.now()) return null;
+  // Every deploy has its own BUILD_ID (deploy.ps1), so a session from an earlier deploy no longer counts and everyone signs in again.
+  if ((data.b || "") !== String(env.BUILD_ID || "")) return null;
   return (await isAllowed(env, data.e)) ? data.e : null;
 }
 
@@ -299,7 +301,7 @@ async function callback(request, env) {
     await logEvent(env, request, "sign-in refused", me && me.email, me && me.email_verified !== true ? "email not verified" : "not on the list");
     return new Response(denied().body, { status: 403, headers: Object.assign({ "Content-Type": "text/html; charset=utf-8", "Set-Cookie": cookie(STATE_COOKIE, "", 0) }, HEADERS) });
   }
-  const payload = b64url(enc.encode(JSON.stringify({ e: String(me.email).toLowerCase(), x: Date.now() + SESSION_DAYS * 86400000 })));
+  const payload = b64url(enc.encode(JSON.stringify({ e: String(me.email).toLowerCase(), x: Date.now() + SESSION_DAYS * 86400000, b: String(env.BUILD_ID || "") })));
   await logEvent(env, request, "sign-in", me.email);
   const headers = new Headers(HEADERS);
   headers.set("Location", "/");
@@ -463,7 +465,12 @@ export default {
       if (path.startsWith("/api/team/")) return planStore(request, env, path.slice("/api/team/".length), email);
       return new Response("Not found", { status: 404, headers: HEADERS });
     }
-    if (!email) return landing();
+    if (!email) {
+      const page = landing();
+      // Drop a session cookie that is no longer valid (for example from an earlier deploy).
+      if (cookies(request)[SESSION_COOKIE]) page.headers.append("Set-Cookie", cookie(SESSION_COOKIE, "", 0));
+      return page;
+    }
     const res = await env.ASSETS.fetch(request);
     const headers = new Headers(res.headers);
     Object.keys(HEADERS).forEach(k => headers.set(k, HEADERS[k]));

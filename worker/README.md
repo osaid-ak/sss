@@ -46,7 +46,7 @@ The old page at https://osaid-ak.github.io/sss/ and the old plan address (mantle
 
 ## Changing who is allowed or who starts as an Admin
 
-`npx wrangler@4 secret put ALLOWED_EMAILS` (or `ADMIN_EMAILS`) with the new list, or use Users inside the calendar. It takes effect on the next request, and removed people are locked out even if already signed in. Role changes made in the app are stored separately and win over `ADMIN_EMAILS`. Sessions last 7 days.
+`npx wrangler@4 secret put ALLOWED_EMAILS` (or `ADMIN_EMAILS`) with the new list, or use Users inside the calendar. It takes effect on the next request, and removed people are locked out even if already signed in. Role changes made in the app are stored separately and win over `ADMIN_EMAILS`. Sessions last 7 days, and every `.\deploy.ps1` signs everyone out (a new `BUILD_ID` is part of the cookie), so people sign in again after each deploy.
 
 ## Activity log
 

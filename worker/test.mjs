@@ -225,5 +225,17 @@ env.ALLOWED_EMAILS = "ann@example.com";
 check("removed email loses access with an existing session", (await get("/api/team/plan", bob.session)).status === 401);
 env.ALLOWED_EMAILS = saved;
 
+// a new deploy (new BUILD_ID) signs everyone out; signing in again works
+env.BUILD_ID = "20260101000000";
+const carl = await signIn("ann@example.com");
+check("a session from the same deploy works", (await get("/api/team/plan", carl.session)).status !== 401);
+env.BUILD_ID = "20260102000000";
+check("a session from an earlier deploy is rejected", (await get("/api/team/plan", carl.session)).status === 401);
+const stale = await get("/", carl.session);
+check("a stale session sees the sign-in page and its cookie is cleared", (await stale.text()).includes("Sign in with Google") && /sss_session=;.*Max-Age=0/.test(stale.headers.get("Set-Cookie") || ""));
+const again = await signIn("ann@example.com");
+check("signing in again after a deploy works", (await get("/api/team/plan", again.session)).status !== 401);
+delete env.BUILD_ID;
+
 console.log(failed ? failed + " failed" : "all passed");
 process.exit(failed ? 1 : 0);
