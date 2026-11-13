@@ -1,25 +1,24 @@
 # Shift Plan (SSS)
 
-Support-floor coverage calendar. One HTML file. The live page is https://osaid-ak.github.io/sss/ and the header reads **Shift Plan**.
+Support-floor coverage calendar. One HTML file. The live page is https://shift-plan.autoleap-sss.workers.dev/ (Google sign-in required) and the header reads **Shift Plan**. The old GitHub Pages address, https://osaid-ak.github.io/sss/, only redirects there.
 
 Read this file before changing the calendar. Update it in the same change when behavior, publish steps, or standing rules change.
 
 ## Files
 
 - `coverage-calendar.html` is the working copy. It is not committed.
-- `index.html` is the published page. It must match the working copy before a commit.
+- `index.html` is only a redirect to the worker address (a copy of `worker/stub-index.html`). It no longer matches the working copy. Never put the calendar back into it: GitHub Pages is public.
 - `serve-calendar.py` is a local server only. Do not commit it.
 - `README.md` is the short tester note. Keep it consistent with this file.
 
 ## Publish
 
 1. Edit `coverage-calendar.html`.
-2. Copy it over `index.html`.
-3. Commit only `index.html` for calendar changes, plus this file when the rules changed.
-4. Push `main`. GitHub Pages serves `/` from `main`.
-5. Tell the user to hard-refresh with Ctrl+F5. Pages can keep the previous HTML while a build is running.
+2. In the `worker` folder run `.\deploy.ps1`. It builds the protected copy (plan address and `SSS_GATED` swapped in) and uploads the worker.
+3. Commit `AGENTS.md` and anything else that changed (the calendar file itself is not committed), then push `main`. Do not touch `index.html`.
+4. Tell the user to hard-refresh with Ctrl+F5 on the worker address.
 
-Do not commit `coverage-calendar.html`, `serve-calendar.py`, or secrets. On PowerShell, commit with `git commit -m "..."` and chain commands with `;`.
+Test with a copy of the calendar pointed at a local stand-in (see "How the data is shared"), then deploy. Do not commit `coverage-calendar.html`, `serve-calendar.py`, `worker/seed-plan.json`, or secrets. On PowerShell, commit with `git commit -m "..."` and chain commands with `;`.
 
 ## Sign-in gate (Cloudflare Worker, in `worker/`)
 
@@ -27,7 +26,7 @@ Access is restricted to people on the allowed email list, who sign in with Googl
 
 Roles when gated: Member (no Access button, no lead tools), Admin (lead access without the PIN, plus Users under Access to add people as Members, remove Members and change Members' roles; added and removed people are kept in the ROLES store on top of `ALLOWED_EMAILS`) and Super Admin (one person; the only one who can add an Admin or change or remove an Admin). Everyone signed in gets a Sign out button in the header. Sessions are signed cookies (7 days), not a server-side list; the worker keeps an activity log of the latest 500 events (sign-in, refused sign-in, sign-out, user added, removed or role changed) in the ROLES store, readable by Admins under Access > Activity log. Each entry holds email, event, time, country, IP address and browser (User-Agent, shortened to 200 characters); these are personal data of teammates, so only Admins can read them and they are never shown to Members. The log has a search box that filters live from 2 characters on (several words must all match) across everything shown in a row: time, event, email, detail, IP, browser, country. The panel shows a short label such as "Chrome on Windows" with the full browser string on hover. The IP and browser fields are there so a future mobile app's sign-ins can be told apart. The server decides the role (`/api/me`) and enforces role changes. `SSS_GATED` stays `false` in the committed file; the PIN flow still applies to the ungated GitHub Pages copy.
 
-The plan store starts empty after the first deploy; a browser with no plan of its own shows "No team plan yet" (never the starter data), and an Admin starts it with Import plan file (see the worker README). Status: until the public copy is closed (see "Closing the public copy" in the worker README), the GitHub Pages page and the old mantledb plan are still public and the Publish steps below still apply. Once the gate is live, publishing a calendar change means running `worker/deploy.ps1`, and `index.html` becomes the redirect stub. Update this file when that happens.
+The gate is live: the calendar and the plan are only served after Google sign-in, the plan is stored in the worker, and `index.html` on GitHub Pages is a redirect. A browser with no plan of its own shows "No team plan yet" (never the starter data) when the store is empty, and an Admin starts it with Import plan file. Still open: the old mantledb plan is public and in the git history, so overwrite it with an empty placeholder once mantledb is reachable and everyone has reloaded; making the repo private is optional.
 
 ## How the data is shared
 

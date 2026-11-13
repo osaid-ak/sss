@@ -4,11 +4,9 @@ Team test copy of the support shift calendar.
 
 ## Live page
 
-https://osaid-ak.github.io/sss/
+https://shift-plan.autoleap-sss.workers.dev/ (sign in with your Google account; only people on the allowed list get in). The old address, https://osaid-ak.github.io/sss/, redirects there.
 
-The header on the site is **Shift Plan**.
-
-A true custom hostname such as `sss.yourteam.com` is free on GitHub Pages, but you have to own the domain.
+The header on the site is **Shift Plan**. Setup and roles are in [worker/README.md](worker/README.md).
 
 ## Weekend Cover
 
@@ -24,13 +22,8 @@ Schedule edits sync to the shared team plan, so a change on one browser shows up
 
 Product rules and how to publish a change are in [AGENTS.md](AGENTS.md).
 
-## Safety of a public GitHub repo
+## Safety
 
-Treat this as an internal test link, not a vault.
+The calendar and the shared plan are served only after Google sign-in, and only to people on the allowed list (see worker/README.md). The GitHub repo is still public, so it holds no secrets and no plan data: the calendar page itself is deployed straight to the worker and is not committed. Old commits still show an earlier version of the page (including the old lead PIN, which the gated site ignores) and the address of the old public plan, which is being emptied. Making the repo private is optional.
 
-- Anyone on the internet can open the repo and the live page if they find the URL.
-- Teammate names, the Google Sheet ID, and the lead PIN are in the page source.
-- A public repo can be indexed by search engines.
-- Google tokens were not uploaded. The sheet stays as private as its Google sharing settings. If you make Weekend Cover “anyone with the link” so the calendar can auto-sync, that tab is readable by anyone who has the link.
-
-Safer for a longer test: make the GitHub repo **private** and host the page on Cloudflare Pages (free), then share only that URL with the team.
+The Google Sheet stays as private as its own sharing settings. The calendar reads it from each person's browser, so if a tab is "anyone with the link", anyone with the link can read that tab.
