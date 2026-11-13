@@ -203,6 +203,17 @@ check("removed cover and a reset day are logged", /Removed Phase 1 late shift co
 const countBefore = (await planLog()).length;
 await save(ann.session, next, "2026-11-14T09:12:00.000Z");
 check("an unchanged save adds no entries", (await planLog()).length === countBefore);
+// hours the page took from the sheet are not logged as someone's edit, a hand change still is
+const sheet = clone(next);
+sheet.people[0].start += 2;
+sheet.sheetRoster = { [sheet.people[0].name]: { start: sheet.people[0].start, len: sheet.people[0].len } };
+await save(ann.session, sheet, "2026-11-14T09:12:30.000Z");
+check("a roster change that matches the sheet is not logged as an edit", (await planLog()).length === countBefore);
+const hand = clone(sheet);
+hand.people[1].start += 2;
+await save(ann.session, hand, "2026-11-14T09:12:40.000Z");
+check("a hand change to someone's shift is still logged", /Changed .+'s shift or break/.test((await planLog())[0].detail));
+next = hand;
 const big = clone(next); for (let i = 0; i < 20; i++) big.people.push(person("P" + i));
 await save(ann.session, big, "2026-11-14T09:13:00.000Z");
 check("a huge change collapses to one line", /Large change \(20 items\)/.test((await planLog())[0].detail));

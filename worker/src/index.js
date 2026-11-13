@@ -158,7 +158,10 @@ function planChanges(prev, next) {
   Object.keys(np).forEach(n => {
     if (!pp[n]) { out.push("Added " + n + " to the roster"); return; }
     const a = pp[n], b = np[n];
-    if (!same([a.start, a.len, a.brk, a.split], [b.start, b.len, b.brk, b.split])) out.push("Changed " + n + "'s shift or break");
+    // Hours the page took from the Google Sheet (sheetRoster) are not an edit by whoever saved next.
+    const sr = (next.sheetRoster || {})[n];
+    const fromSheet = sr && sr.start === b.start && sr.len === b.len && (a.start !== b.start || a.len !== b.len);
+    if (!fromSheet && !same([a.start, a.len, a.brk, a.split], [b.start, b.len, b.brk, b.split])) out.push("Changed " + n + "'s shift or break");
     if (!same([a.roles, a.queue, a.group], [b.roles, b.queue, b.group])) out.push("Changed " + n + "'s roles");
   });
   Object.keys(pp).forEach(n => { if (!np[n]) out.push("Removed " + n + " from the roster"); });
