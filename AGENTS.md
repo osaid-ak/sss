@@ -34,6 +34,8 @@ Sheet updates and hand edits: the page re-reads all three sheet tabs when it ope
 
 Edits sync through the shared plan named `TEAM_PLAN` in the calendar file. A browser also keeps a local copy. Do not describe the calendar as Export/Import only.
 
+Removing someone from the roster records them in the plan's `removed` list (name and time). Every merge and load drops those names from the roster, the default Support Line bars and hand-edited weekdays, so an older copy in another browser cannot bring them back (the three-way merge alone would, when that browser has no sync base). Adding the same name again clears the entry. Saturdays follow the Weekend Cover sheet, so a name still on that sheet still shows on Saturdays until the sheet is changed; leave history stays.
+
 Safety rule: a browser that has no plan of its own must adopt the team plan exactly on first contact, and data read from the Google Sheet (weekend names, VIP blocks) is saved quietly without counting as a team edit. Never let anything bump `updatedAt` or push before the first team sync finishes, because built-in default names and hours would then overwrite the team's roster. When testing, never load the live page from a fresh browser such as the preview pane. Use a copy pointed at a local stand-in for the team plan.
 
 Each browser keeps up to 5 automatic backups (local storage key `coverage-calendar-backups`), taken before a teammate or merged update (at most every 15 minutes) and before a JSON import or restore. Lead tools has Restore backup. Import asks for confirmation because it replaces the shared plan. Browser panes that block storage skip backups silently.
