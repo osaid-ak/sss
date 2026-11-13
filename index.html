@@ -1549,6 +1549,11 @@
   let hadLocalPlan = false;
   let teamFirstDone = false;
   let teamLoadFailed = false;
+  let teamEmpty = false;
+  // A browser with no plan of its own, still waiting for the team plan (or finding the shared plan empty), must neither show nor edit the starter data.
+  function waitingForPlan() {
+    return !hadLocalPlan && !data.updatedAt && !openedFromSnapshot && (!teamFirstDone || teamEmpty);
+  }
   let serverRole = null;
   let serverEmail = "";
   function isAdminRole() { return serverRole === "admin" || serverRole === "super"; }
@@ -1767,7 +1772,7 @@
   async function writeTeam(calendar, updatedAt) {
     const packed = JSON.stringify(calendar);
     let res;
-    if (packed.length <= 50000) {
+    if (SSS_GATED || packed.length <= 50000) {
       res = await fetch(TEAM_PLAN, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1803,6 +1808,7 @@
     const calendar = preparedCalendar(doc && doc.calendar);
     if (!calendar) return;
     takeBackup("Before a teammate update");
+    teamEmpty = false;
     teamPending = null;
     teamQuiet = true;
     data = calendar;
@@ -1819,7 +1825,8 @@
     const localCal = preparedCalendar(calendarCopy());
     if (!remoteDoc || !remoteDoc.calendar) {
       if (!hadLocalPlan && !localAt) {
-        setTeamStatus("Waiting for the team", "wait");
+        setTeamStatus("No team plan yet", "wait");
+        teamEmpty = true;
         return;
       }
       if (screenBusy()) { teamQueued = true; setTeamStatus("Reconnecting", "wait"); return; }
@@ -1833,7 +1840,7 @@
       return;
     }
     const remoteAt = String(remoteDoc.updatedAt);
-    if (!teamFirstDone && !hadLocalPlan && !data.updatedAt && !readSyncBase()) {
+    if ((!teamFirstDone || teamEmpty) && !hadLocalPlan && !data.updatedAt && !readSyncBase()) {
       // Nothing of ours to merge. The built-in defaults must never beat the team's saved plan.
       const first = preparedCalendar(remoteDoc.calendar);
       if (first) {
@@ -1894,6 +1901,7 @@
         await reconcile(await readTeam());
         teamFirstDone = true;
         teamLoadFailed = false;
+        if (data.updatedAt) teamEmpty = false;
         if (first && !hadLocalPlan) render();
       } while (teamQueued && !screenBusy());
       teamPollMs = 20000;
@@ -4505,14 +4513,19 @@
     if (ui.view === "year" && !ui.leadAccess) ui.view = "week";
     renderChrome();
     const main = document.getElementById("main");
-    if (!teamFirstDone && !hadLocalPlan && !data.updatedAt && !openedFromSnapshot) {
-      // A browser with no plan of its own must not show or edit the built-in starter data while it waits for the team plan.
+    if (waitingForPlan()) {
       document.getElementById("teamPane").innerHTML = "";
-      main.innerHTML = teamLoadFailed
-        ? `<div class="loading-card"><h2>Could not load the team plan</h2><p>Check your connection, then try again. Nothing has been changed.</p><button type="button" class="primary" id="retryLoad">Try again</button></div>`
-        : `<div class="loading-card" role="status"><div class="spinner"></div><h2>Loading the team plan…</h2></div>`;
-      const retry = document.getElementById("retryLoad");
-      if (retry) retry.addEventListener("click", () => { teamLoadFailed = false; render(); syncTeam(); });
+      if (teamEmpty && teamFirstDone) {
+        main.innerHTML = `<div class="loading-card"><h2>No team plan yet</h2><p>The shared plan is empty. ${ui.leadAccess ? "Import the plan file to start it." : "An Admin needs to import the plan file."}</p>${ui.leadAccess ? `<button type="button" class="primary" id="importFirst">Import plan file</button>` : ""}</div>`;
+        const first = document.getElementById("importFirst");
+        if (first) first.addEventListener("click", () => document.getElementById("fileIn").click());
+      } else {
+        main.innerHTML = teamLoadFailed
+          ? `<div class="loading-card"><h2>Could not load the team plan</h2><p>Check your connection, then try again. Nothing has been changed.</p><button type="button" class="primary" id="retryLoad">Try again</button></div>`
+          : `<div class="loading-card" role="status"><div class="spinner"></div><h2>Loading the team plan…</h2></div>`;
+        const retry = document.getElementById("retryLoad");
+        if (retry) retry.addEventListener("click", () => { teamLoadFailed = false; render(); syncTeam(); });
+      }
       if (flushTeam) syncTeam();
       return;
     }
@@ -7038,8 +7051,7 @@
     attnTimer = setTimeout(() => {
       const btn = document.getElementById("attnBtn");
       if (!btn) return;
-      const waiting = !teamFirstDone && !hadLocalPlan && !data.updatedAt;
-      const n = (waiting || !ui.leadAccess) ? 0 : attentionItems().length;
+      const n = (waitingForPlan() || !ui.leadAccess) ? 0 : attentionItems().length;
       btn.classList.toggle("hidden", n === 0);
       const label = n === 1 ? "1 night needs action" : n + " nights need action";
       btn.innerHTML = `<span class="attn-n">${n}</span><span class="attn-t"> ${n === 1 ? "night needs" : "nights need"} action</span>`;

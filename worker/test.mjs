@@ -1,5 +1,5 @@
 // Offline checks for the sign-in gate and roles. Run: node test.mjs
-import worker from "./src/index.js";
+import worker, { PlanStore } from "./src/index.js";
 
 const kvStore = new Map();
 const env = {
@@ -9,7 +9,12 @@ const env = {
   ALLOWED_EMAILS: "Ann@Example.com, bob@example.com, cat@example.com, dan@example.com",
   ADMIN_EMAILS: "ann@example.com, dan@example.com",
   SUPER_ADMIN: "boss@example.com",
-  PLAN_BASE: "https://store.test/v2/abc",
+  // an in-memory Durable Object, using the real PlanStore class
+  PLAN: (() => {
+    const mem = new Map();
+    const store = new PlanStore({ storage: { get: async k => mem.get(k), put: async (k, v) => { mem.set(k, v); } } });
+    return { idFromName: n => n, get: () => ({ fetch: (url, init) => store.fetch(new Request(url, init)) }) };
+  })(),
   ROLES: { get: async k => kvStore.get(k) || null, put: async (k, v) => { kvStore.set(k, v); } },
   ASSETS: { fetch: async () => new Response("<html>CALENDAR</html>", { headers: { "Content-Type": "text/html" } }) }
 };
@@ -39,7 +44,6 @@ globalThis.fetch = async (url, init) => {
       ? Response.json({ access_token: "tok" }) : new Response("no", { status: 400 });
   }
   if (url === "https://openidconnect.googleapis.com/v1/userinfo") return Response.json({ email: googleEmail, email_verified: googleVerified });
-  if (url.startsWith("https://store.test/")) return Response.json({ upstream: url, method: init.method, body: init.body || null });
   return new Response("unexpected " + url, { status: 500 });
 };
 
@@ -79,8 +83,17 @@ const boss = await signIn("boss@example.com");
 check("Super Admin signs in without being in ALLOWED_EMAILS", boss.session);
 check("starting roles: admin, member, super", (await (await get("/api/me", ann.session)).json()).role === "admin" &&
   (await (await get("/api/me", bob.session)).json()).role === "member" && (await (await get("/api/me", boss.session)).json()).role === "super");
-check("plan GET is proxied", (await (await get("/api/team/plan/part/2", bob.session)).json()).upstream === "https://store.test/v2/abc/plan/part/2");
+const putPlan = (cookie, body) => worker.fetch(new Request(ORIGIN + "/api/team/plan", { method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body) }), env);
+check("no plan yet is a 404 the page understands", (await get("/api/team/plan", bob.session)).status === 404);
+const planDoc = { version: 1, updatedAt: "2026-11-13T10:00:00.000Z", parts: 1, calendar: { people: [{ name: "Zed" }], days: {} } };
+check("a signed-in member can save the plan", (await putPlan(bob.session, planDoc)).status === 200);
+check("the plan comes back exactly as saved", JSON.stringify(await (await get("/api/team/plan", ann.session)).json()) === JSON.stringify(planDoc));
+check("a second save replaces the first", (await putPlan(ann.session, Object.assign({}, planDoc, { updatedAt: "2026-11-13T11:00:00.000Z" }))).status === 200 && (await (await get("/api/team/plan", bob.session)).json()).updatedAt === "2026-11-13T11:00:00.000Z");
+check("text that is not JSON is refused", (await putPlan(bob.session, "not json")).status === 400);
+check("JSON that is not a plan is refused", (await putPlan(bob.session, { hello: "world" })).status === 400);
+check("the old part-by-part paths no longer exist", (await get("/api/team/plan/part/0", bob.session)).status === 404);
 check("path tricks are refused", (await get("/api/team/../secret", bob.session)).status === 404);
+check("signed-out people cannot save the plan", (await worker.fetch(new Request(ORIGIN + "/api/team/plan", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(planDoc) }), env)).status === 401);
 
 // 4. not allowed / unverified
 check("email not on the list is denied", (await signIn("eve@example.com")).res.status === 403);

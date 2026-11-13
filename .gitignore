@@ -5,3 +5,5 @@ worker/public/
 worker/node_modules/
 worker/.dev.vars
 worker/.wrangler/
+worker/seed-plan.json
+worker/wrangler-dev.log

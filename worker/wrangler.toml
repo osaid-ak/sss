@@ -12,3 +12,12 @@ run_worker_first = true
 # Role changes made in the app are stored here. Wrangler creates the store on the first deploy.
 [[kv_namespaces]]
 binding = "ROLES"
+
+# The shared team plan lives in a Durable Object (SQLite-backed, available on the free plan).
+[[durable_objects.bindings]]
+name = "PLAN"
+class_name = "PlanStore"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["PlanStore"]

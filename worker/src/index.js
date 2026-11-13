@@ -7,11 +7,11 @@
 //   /api/me         who am I and my role
 //   /api/users      Admins: list people (GET) / add, remove, change a role (POST)
 //   /api/log        Admins: recent sign-ins, sign-outs and user changes
-//   /api/team/*     the shared team plan (proxied to PLAN_BASE, signed-in people only)
+//   /api/team/plan the shared team plan, kept in a Durable Object (signed-in people only)
 //   everything else the calendar page (static asset, signed-in people only)
 //
 // Secrets (set with `wrangler secret put`, never committed):
-//   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SESSION_SECRET, PLAN_BASE
+//   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SESSION_SECRET
 //   ALLOWED_EMAILS  comma-separated: everyone who may sign in
 //   ADMIN_EMAILS    comma-separated: who starts as an Admin (everyone else starts as a Member)
 //   SUPER_ADMIN     one email: always allowed, always the Super Admin, can change Admins' roles
@@ -269,22 +269,43 @@ async function userAction(request, env, actorEmail) {
   return json({ ok: true, users: await listUsers(env) });
 }
 
-async function proxyPlan(request, env, rest) {
-  if (!env.PLAN_BASE) return new Response("Plan store is not configured.", { status: 500, headers: HEADERS });
-  if (request.method !== "GET" && request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: HEADERS });
-  if (!/^[a-z0-9/_-]*$/i.test(rest) || rest.includes("..")) return new Response("Not found", { status: 404, headers: HEADERS });
-  const url = String(env.PLAN_BASE).replace(/\/+$/, "") + (rest ? "/" + rest : "");
-  const init = { method: request.method, headers: { Accept: "application/json" } };
-  if (request.method === "POST") {
-    init.headers["Content-Type"] = "application/json";
-    init.body = await request.text();
-    // The whole plan is well under this; the cap stops a runaway or hostile write.
-    if (init.body.length > 2000000) return new Response("Too large", { status: 413, headers: HEADERS });
+// The shared plan lives in one Durable Object, so there is a single strongly consistent copy: no third-party store to go down and
+// no public address to protect. It holds the plan document exactly as the page sends it (plan plus its last-edit time).
+const PLAN_MAX = 1900000;
+export class PlanStore {
+  constructor(state) { this.state = state; }
+  async fetch(request) {
+    const headers = { "Content-Type": "application/json" };
+    if (request.method === "GET") {
+      const doc = await this.state.storage.get("doc");
+      return doc ? new Response(doc, { headers }) : new Response('{"error":"no plan yet"}', { status: 404, headers });
+    }
+    if (request.method === "POST") {
+      await this.state.storage.put("doc", await request.text());
+      return new Response('{"ok":true}', { headers });
+    }
+    return new Response("Method not allowed", { status: 405 });
   }
-  const upstream = await fetch(url, init);
+}
+async function planStore(request, env, rest) {
+  if (!env.PLAN) return new Response("Plan store is not configured.", { status: 500, headers: HEADERS });
+  if (rest !== "plan") return new Response("Not found", { status: 404, headers: HEADERS });
+  if (request.method !== "GET" && request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: HEADERS });
+  const init = { method: request.method };
+  if (request.method === "POST") {
+    const text = await request.text();
+    if (text.length > PLAN_MAX) return new Response("Too large", { status: 413, headers: HEADERS });
+    let doc;
+    try { doc = JSON.parse(text); } catch (e) { return json({ error: "not JSON" }, 400); }
+    if (!doc || typeof doc !== "object" || typeof doc.updatedAt !== "string" || !doc.updatedAt || !doc.calendar || typeof doc.calendar !== "object") {
+      return json({ error: "that is not a plan" }, 400);
+    }
+    init.body = text;
+  }
+  const res = await env.PLAN.get(env.PLAN.idFromName("plan")).fetch("https://plan.internal/doc", init);
   const headers = new Headers(HEADERS);
-  headers.set("Content-Type", upstream.headers.get("Content-Type") || "application/json");
-  return new Response(upstream.body, { status: upstream.status, headers });
+  headers.set("Content-Type", "application/json");
+  return new Response(res.body, { status: res.status, headers });
 }
 
 export default {
@@ -326,7 +347,7 @@ export default {
         if (env.ROLES) { try { list = JSON.parse((await env.ROLES.get("log")) || "[]") || []; } catch (e) { list = []; } }
         return json({ log: list.slice().reverse(), kept: LOG_KEEP });
       }
-      if (path.startsWith("/api/team/")) return proxyPlan(request, env, path.slice("/api/team/".length));
+      if (path.startsWith("/api/team/")) return planStore(request, env, path.slice("/api/team/".length));
       return new Response("Not found", { status: 404, headers: HEADERS });
     }
     if (!email) return landing();
