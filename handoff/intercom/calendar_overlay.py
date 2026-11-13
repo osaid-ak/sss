@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
 """Calendar overlay for the Phase 1 / VIP rotation (drop this file next to rotation.py).
 
-The Shift Plan calendar tells the automation where a LEAD changed something. The automation still reads the sheet for the
-rotation itself, and it stays the only thing that writes to Intercom. Everything here is a pure function (no Intercom, no Slack,
-no file access) except `fetch_plan`, which makes one read-only HTTP call. Standard library only.
+The Shift Plan calendar tells the automation where a LEAD changed something. The automation still reads the sheet for the rotation itself,
+and it stays the only thing that writes to Intercom. Everything here is a pure function (no Intercom, no Slack, no file access) except
+`fetch_plan`, which makes one read-only HTTP call. Standard library only.
 
 Vocabulary
   shift day   named by the date it starts on; runs from 15:00 PKT that day to 15:00 PKT the next day.
   kind        "weekday" (rotation applies), "saturday" (no rotation), "sunday" (closed: hold, change nothing).
-  decision    a person whose queue on that shift day differs from normal: {"name", "queue", "reason", "lead"}.
+              On a Saturday nobody moves unless the Weekend Cover sheet names them: those it names as VIP or Phase 1 are decisions with
+              that queue (the rotation person goes to VIP only if named as a VIP rep, otherwise stays on Phase 1).
+  decision    a person whose queue on that shift day differs from normal: {"name", "email", "queue", "reason", "lead"}.
               queue is "phase1", "vip" or "both" (in both teams).
-  overlay     the decisions as {intercom_id: queue}, after names are mapped to Intercom IDs.
+  overlay     the decisions as {intercom_id: queue}, after names are mapped to Intercom IDs and checked against emails.
 
-The one rule that keeps this safe: if anything about the calendar is wrong or unreachable, `fetch_plan` / `parse_plan` raise
-CalendarError and the caller carries on with the sheet alone, exactly as it does today.
+The one rule that keeps this safe: if anything about the calendar is wrong or unreachable, `fetch_plan` / `parse_plan` raise CalendarError
+and the caller carries on with the sheet alone, exactly as it does today.
 """
 import json
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import date, datetime, timedelta, timezone
+from datetime import timedelta, timezone
 
 PKT = timezone(timedelta(hours=5))
 QUEUES = ("phase1", "vip", "both")
@@ -43,11 +45,19 @@ def day_kind(day):
     return "sunday" if wd == 6 else "saturday" if wd == 5 else "weekday"
 
 
+def rotation_day(day):
+    """The date whose sheet block decides who the rotation puts on Phase 1 for this shift day: the day itself on weekdays, and Friday
+    for Saturday and Sunday (blocks run Monday to Friday, so the block is over on Saturday, but its person is who stays on Phase 1
+    unless the Weekend Cover says otherwise). Use it to find `block` / `person` for a Saturday instead of treating the block as ended."""
+    return day - timedelta(days={5: 1, 6: 2}.get(day.weekday(), 0))
+
+
 # --------------------------------------------------------------------------- read
 
 def fetch_plan(base_url, api_key, day, days=3, timeout=10, retries=1, opener=None):
     """GET {base_url}/api/v1/intercom-plan?from=<day>&days=<n>. Returns the parsed, validated plan or raises CalendarError.
-    One retry on a network error or a 5xx; a 401/403/4xx is not retried (the key or the request is wrong)."""
+    One retry on a network error or a 5xx; a 401/403/4xx is not retried (the key or the request is wrong). The calendar reads the Google
+    Sheet itself on every call (a few seconds at most), so allow it time: the default timeout is 10 seconds."""
     url = f"{base_url.rstrip('/')}/api/v1/intercom-plan?" + urllib.parse.urlencode({"from": day.isoformat(), "days": days})
     req = urllib.request.Request(url, headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json",
                                                "User-Agent": "phase-rotation/1"})
@@ -108,35 +118,62 @@ def day_entry(plan, day):
 
 # --------------------------------------------------------------------------- decisions -> overlay
 
-def overlay_for(entry, name_ids, apply_to_leads=False):
-    """-> (overlay {intercom_id: queue}, problems [text]). Names are matched case-insensitively against `name_ids`
-    ({"Raza": "5573818", ...}). A name that is not in the map is skipped and reported, never guessed. Leads are skipped unless
-    `apply_to_leads`. More than MAX_OVERLAY people raises CalendarError."""
+def overlay_for(entry, name_ids, apply_to_leads=False, admins=None, require_email=True):
+    """-> (overlay {intercom_id: queue}, problems [text], names {intercom_id: calendar name}).
+
+    Who is who: the name is looked up in `name_ids` ({"Raza": "5573818", ...}, case-insensitive). A name that is not in the map is
+    skipped and reported, never guessed, unless the calendar sent that person's email and exactly one Intercom teammate has it.
+
+    Email check (the fallback that makes sure the right person is moved): pass `admins`, the Intercom teammates as
+    [{"id": ..., "email": ...}] (phase1_cmd.list_admins(client) already returns this). Then every decision's Intercom ID must belong to a
+    teammate whose email equals the email the calendar sent. A different email, an ID that is not a teammate, or (with `require_email`)
+    a decision without an email: that person is skipped and reported, nobody else is affected. Without `admins` the check is skipped.
+
+    Leads are skipped unless `apply_to_leads`. More than MAX_OVERLAY people raises CalendarError."""
     ids = {n.lower(): str(i) for n, i in name_ids.items()}
-    overlay, problems = {}, []
+    by_id, by_email = {}, {}
+    for a in admins or []:
+        mail = (a.get("email") or "").strip().lower()
+        by_id[str(a["id"])] = mail
+        if mail:
+            by_email.setdefault(mail, []).append(str(a["id"]))
+    overlay, problems, names = {}, [], {}
     if entry["kind"] == "sunday":
-        return overlay, problems  # closed: nobody is decided, the caller holds what it has
+        return overlay, problems, names  # closed: nobody is decided, the caller holds what it has
     for d in entry["decisions"]:
         q = d["queue"]
         if q not in QUEUES:
             continue  # "lead" (no Phase 1 / VIP role that day): nothing to do in these two teams
+        mail = (d.get("email") or "").strip().lower()
         who = ids.get(d["name"].lower())
-        if who is None:
+        if admins is not None:
+            if who is None:
+                found = by_email.get(mail, []) if mail else []
+                if len(found) != 1:
+                    problems.append(f"{d['name']} ({d.get('reason', '')}) is not in the Intercom name map and the email "
+                                    f"{mail or '(none)'} does not identify one teammate; skipped")
+                    continue
+                who = found[0]
+            elif who not in by_id:
+                problems.append(f"{d['name']}: Intercom ID {who} is not a teammate; skipped")
+                continue
+            elif mail and by_id[who] != mail:
+                problems.append(f"{d['name']}: the calendar says {mail} but Intercom ID {who} is {by_id[who] or 'without an email'}; skipped")
+                continue
+            elif not mail and require_email:
+                problems.append(f"{d['name']}: the calendar has no email for them, so the Intercom ID {who} cannot be checked; skipped")
+                continue
+        elif who is None:
             problems.append(f"{d['name']} ({d.get('reason', '')}) is not in the Intercom name map; skipped")
             continue
         if d.get("lead") and not apply_to_leads:
             problems.append(f"{d['name']} is a lead; the calendar says {q} but leads are left alone")
             continue
         overlay[who] = q
+        names[who] = d["name"]
     if len(overlay) > MAX_OVERLAY:
         raise CalendarError(f"the calendar changes {len(overlay)} people on {entry['date']} (limit {MAX_OVERLAY}); ignoring it")
-    return overlay, problems
-
-
-def baseline_person(entry, sheet_person):
-    """Who the rotation puts on Phase 1 on this shift day. A Saturday has no rotation (nobody), and the person goes back to VIP.
-    Pass the result as `person` to the existing rotation logic. Sunday is handled by the caller (hold)."""
-    return None if entry["kind"] == "saturday" else sheet_person
+    return overlay, problems, names
 
 
 def apply_overlay(p1, vip, overlay):
@@ -154,34 +191,48 @@ def apply_overlay(p1, vip, overlay):
     return p1, vip
 
 
-def revert_targets(previous, overlay, plan, name_ids, exclude=()):
+def revert_targets(previous, overlay, plan, exclude=()):
     """People the previous run's overlay moved that today's overlay no longer moves, with the queue they go back to.
-    -> {intercom_id: queue}. Pass the rotation people (the ids in rotation.py's `people`) as `exclude`: the normal baseline puts
-    them right (the person on Phase 1 for the block goes back to Phase 1, everybody else to VIP), and the calendar's
-    `normalQueue` must not override that. The queue is the calendar's `normalQueue` for that person."""
-    by_id = {str(i): n.lower() for n, i in name_ids.items()}
+    -> {intercom_id: queue}. `previous` is the marker saved last time (state["calendar"]); it remembers who was moved and their names.
+    Pass the rotation people (the ids in rotation.py's `people`) as `exclude`: the normal baseline puts them right (the person on
+    Phase 1 for the block goes back to Phase 1, everybody else to VIP), and the calendar's `normalQueue` must not override that.
+    The queue is the calendar's `normalQueue` for that person."""
     normal = {p["name"].lower(): p.get("normalQueue") for p in plan["roster"] if isinstance(p, dict) and "name" in p}
-    back = {}
+    names = (previous or {}).get("names") or {}
     skip = {str(i) for i in exclude}
-    for who in (previous or {}):
+    back = {}
+    for who in (previous or {}).get("overlay") or {}:
         if who in overlay or who in skip:
             continue
-        q = normal.get(by_id.get(who, ""))
+        q = normal.get(str(names.get(who, "")).lower())
         if q in QUEUES:
             back[who] = q
     return back
 
 
-def state_marker(entry, overlay):
-    """What to remember after a run: the shift day, its kind and the overlay. The rotation must run again when this changes
-    (a new day, a Saturday, a Monday after it, an edit in the calendar), not only when the sheet's block changes."""
-    return {"day": entry["date"], "kind": entry["kind"], "overlay": dict(sorted(overlay.items()))}
+def state_marker(entry, overlay, names=None):
+    """What to remember after a run: the shift day, its kind, the overlay and the names behind the IDs. The rotation must run again when
+    this changes (a new day, a Saturday, a Monday after it, an edit in the calendar), not only when the sheet's block changes."""
+    return {"day": entry["date"], "kind": entry["kind"], "overlay": dict(sorted(overlay.items())),
+            "names": {k: v for k, v in sorted((names or {}).items()) if k in overlay}}
+
+
+def source_notes(plan):
+    """Information for the log: the calendar could not read the sheet itself just now, so part of its answer comes from its stored copy
+    (still right unless the sheet changed since someone last opened the calendar). -> [text]."""
+    out = []
+    src = plan.get("sources") or {}
+    if src.get("weekendCover") != "sheet":
+        out.append("the calendar used its stored Weekend Cover names (it could not read the sheet just now)")
+    if src.get("rotation") != "sheet":
+        out.append("the calendar used its stored rotation (it could not read the sheet just now)")
+    return out
 
 
 def rotation_check(entry, sheet_person):
     """Shadow-mode cross-check: the calendar's idea of the rotation person against the sheet's. -> warning text or None.
-    A difference usually means the calendar has not read the sheet yet (nobody opened it), so it is information, not an error."""
-    if entry["kind"] != "weekday":
+    A difference usually means the calendar had to use its stored copy; see `source_notes`. Information, not an error."""
+    if entry["kind"] == "sunday":
         return None
     cal = entry.get("rotationPhase1")
     if (cal or None) != (sheet_person or None):

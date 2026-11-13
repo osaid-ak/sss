@@ -3,37 +3,47 @@
   "generatedAt": "2026-11-16T10:00:00.000Z",
   "planUpdatedAt": "2026-11-16T09:00:00.000Z",
   "sheetReadAt": "2026-11-16T08:00:00.000Z",
+  "sources": {
+    "weekendCover": "stored",
+    "rotation": "stored"
+  },
   "timezone": "UTC+05:00",
   "boundary": "15:00",
   "currentShiftDay": "2026-11-16",
   "roster": [
     {
       "name": "Raza",
+      "email": "ahmed.raza@autoleap.com",
       "normalQueue": "vip",
       "lead": false
     },
     {
       "name": "Ivan",
+      "email": "ivan@autoleap.com",
       "normalQueue": "vip",
       "lead": false
     },
     {
       "name": "Ammana",
+      "email": "ammana@autoleap.com",
       "normalQueue": "vip",
       "lead": false
     },
     {
       "name": "Jawad",
+      "email": "muhammad.jawad@autoleap.com",
       "normalQueue": "vip",
       "lead": false
     },
     {
       "name": "Osaid",
+      "email": "osaid@autoleap.com",
       "normalQueue": "vip",
       "lead": true
     },
     {
       "name": "Ayeshah",
+      "email": "ayeshah@autoleap.com",
       "normalQueue": "phase1",
       "lead": false
     }
@@ -57,6 +67,7 @@
       "decisions": [
         {
           "name": "Ivan",
+          "email": "ivan@autoleap.com",
           "queue": "phase1",
           "reason": "day edited by a lead",
           "lead": false
@@ -73,6 +84,7 @@
       "decisions": [
         {
           "name": "Ammana",
+          "email": "ammana@autoleap.com",
           "queue": "phase1",
           "reason": "Phase 1 queue cover",
           "lead": false
@@ -102,14 +114,29 @@
       "date": "2026-11-21",
       "weekday": "Sat",
       "kind": "saturday",
-      "rotationPhase1": null,
+      "rotationPhase1": "Jawad",
       "edited": false,
       "decisions": [
         {
           "name": "Ivan",
+          "email": "ivan@autoleap.com",
           "queue": "phase1",
           "reason": "weekend cover",
           "lead": false
+        },
+        {
+          "name": "Jawad",
+          "email": "muhammad.jawad@autoleap.com",
+          "queue": "vip",
+          "reason": "weekend cover",
+          "lead": false
+        },
+        {
+          "name": "Osaid",
+          "email": "osaid@autoleap.com",
+          "queue": "vip",
+          "reason": "weekend cover",
+          "lead": true
         }
       ],
       "boundary": "2026-11-21T15:00:00+05:00"
@@ -131,6 +158,91 @@
       "edited": false,
       "decisions": [],
       "boundary": "2026-11-23T15:00:00+05:00"
+    },
+    {
+      "date": "2026-11-24",
+      "weekday": "Tue",
+      "kind": "weekday",
+      "rotationPhase1": "Jawad",
+      "edited": false,
+      "decisions": [],
+      "boundary": "2026-11-24T15:00:00+05:00"
+    },
+    {
+      "date": "2026-11-25",
+      "weekday": "Wed",
+      "kind": "weekday",
+      "rotationPhase1": "Jawad",
+      "edited": false,
+      "decisions": [],
+      "boundary": "2026-11-25T15:00:00+05:00"
+    },
+    {
+      "date": "2026-11-26",
+      "weekday": "Thu",
+      "kind": "weekday",
+      "rotationPhase1": "Jawad",
+      "edited": false,
+      "decisions": [],
+      "boundary": "2026-11-26T15:00:00+05:00"
+    },
+    {
+      "date": "2026-11-27",
+      "weekday": "Fri",
+      "kind": "weekday",
+      "rotationPhase1": "Jawad",
+      "edited": false,
+      "decisions": [],
+      "boundary": "2026-11-27T15:00:00+05:00"
+    },
+    {
+      "date": "2026-11-28",
+      "weekday": "Sat",
+      "kind": "saturday",
+      "rotationPhase1": "Jawad",
+      "edited": false,
+      "decisions": [
+        {
+          "name": "Ayeshah",
+          "email": "ayeshah@autoleap.com",
+          "queue": "phase1",
+          "reason": "weekend cover",
+          "lead": false
+        },
+        {
+          "name": "Osaid",
+          "email": "osaid@autoleap.com",
+          "queue": "vip",
+          "reason": "weekend cover",
+          "lead": true
+        },
+        {
+          "name": "Raza",
+          "email": "ahmed.raza@autoleap.com",
+          "queue": "vip",
+          "reason": "weekend cover",
+          "lead": false
+        }
+      ],
+      "boundary": "2026-11-28T15:00:00+05:00"
+    },
+    {
+      "date": "2026-11-29",
+      "weekday": "Sun",
+      "kind": "sunday",
+      "rotationPhase1": null,
+      "edited": false,
+      "decisions": [],
+      "boundary": "2026-11-29T15:00:00+05:00"
+    },
+    {
+      "date": "2026-11-30",
+      "weekday": "Mon",
+      "kind": "weekday",
+      "rotationPhase1": null,
+      "edited": false,
+      "decisions": [],
+      "boundary": "2026-11-30T15:00:00+05:00"
     }
   ]
 }

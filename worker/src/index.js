@@ -20,7 +20,8 @@
 // Role changes, added people and removed people made in the app are kept in the ROLES key-value store. Roles win over ADMIN_EMAILS.
 // ALLOWED_EMAILS is re-read on every request, so removing an email locks that person out immediately.
 
-import { intercomPlan, shiftDayAt, addDaysKey, validDate } from "./intercom.js";
+import { intercomPlan, shiftDayAt, validDate } from "./intercom.js";
+import { readSheetsLive } from "./sheets.js";
 
 const SESSION_COOKIE = "sss_session";
 const STATE_COOKIE = "sss_state";
@@ -497,7 +498,9 @@ async function automationApi(request, env, url) {
   let doc;
   try { doc = JSON.parse(await res.text()); } catch (e) { return json({ error: "the team plan could not be read" }, 503); }
   if (!doc || !doc.calendar || typeof doc.calendar !== "object") return json({ error: "the team plan is empty or unavailable" }, 503);
-  return json(intercomPlan(doc, from, days, now));
+  // The sheet tabs are read live on every call (so nobody has to have the calendar open); a tab that cannot be read falls back to the stored copy.
+  const [live, emails] = await Promise.all([readSheetsLive(), accessSet(env)]);
+  return json(intercomPlan(doc, from, days, now, { live, emails }));
 }
 
 export default {

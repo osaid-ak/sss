@@ -34,6 +34,7 @@ function cookieOf(res, name) {
 }
 
 // mock Google + plan store
+let sheetMock = () => new Response("forbidden", { status: 403 });
 let googleEmail = "ann@example.com";
 let googleVerified = true;
 globalThis.fetch = async (url, init) => {
@@ -43,6 +44,7 @@ globalThis.fetch = async (url, init) => {
     return b.get("code") === "good" && b.get("client_secret") === "gsecret" && b.get("redirect_uri") === ORIGIN + "/auth/callback"
       ? Response.json({ access_token: "tok" }) : new Response("no", { status: 400 });
   }
+  if (url.startsWith("https://docs.google.com/spreadsheets/")) return sheetMock(url);
   if (url === "https://openidconnect.googleapis.com/v1/userinfo") return Response.json({ email: googleEmail, email_verified: googleVerified });
   return new Response("unexpected " + url, { status: 500 });
 };
@@ -251,7 +253,8 @@ const apiCal = {
   people: [
     rp("Raza"), rp("Ivan"), rp("Ammana"),
     rp("Osaid", { roles: { lead: true, vip: true }, group: "Leads" }),
-    rp("Ayeshah", { roles: { phase1: true }, queue: "phase1", group: "Phase 1" })
+    rp("Ayeshah", { roles: { phase1: true }, queue: "phase1", group: "Phase 1", email: "Ayeshah@Autoleap.com" }),
+    rp("Cat")
   ],
   lineBars: [], leaves: [], holidays: [], sheetPlan: { line: [], hours: {}, readAt: "" },
   vipPlan: { blocks: [{ start: "2026-11-16", end: "2026-11-27", late: "Ammana", phase1: "Raza", cover1: "", cover2: "" }], readAt: "2026-11-14T08:00:00.000Z" },
@@ -283,12 +286,49 @@ check("edited day: only the person the lead moved is a decision", tue.edited ===
 const wed = dayOf("2026-11-18");
 check("Phase 1 queue cover is a decision and a late cover that changes nothing is not", wed.decisions.length === 1 && wed.decisions[0].name === "Ammana" && wed.decisions[0].queue === "phase1" && wed.decisions[0].reason === "Phase 1 queue cover");
 const sat = dayOf("2026-11-21");
-check("Saturday: no rotation, weekend cover Phase 1 person is a decision, VIP names are normal", sat.kind === "saturday" && sat.rotationPhase1 === null && sat.decisions.length === 1 && sat.decisions[0].name === "Ivan" && sat.decisions[0].queue === "phase1" && sat.decisions[0].reason === "weekend cover");
+const satNames = sat.decisions.map(d => d.name + ":" + d.queue).join(",");
+check("Saturday: everyone the Weekend Cover names is a decision with that queue", sat.kind === "saturday" && satNames === "Ivan:phase1,Osaid:vip,Raza:vip" && sat.decisions.every(d => d.reason === "weekend cover"));
+check("Saturday: the rotation person (Raza, named as VIP) goes to VIP, Friday's block names them", sat.rotationPhase1 === "Raza");
+check("Saturday: the rotation person NOT named stays where they are (no decision)", (await (await keyed("/api/v1/intercom-plan?from=2026-11-28&days=1", "key-for-intercom-123")).json()).days[0].decisions.length === 0);
 check("Sunday is closed: nothing decided", dayOf("2026-11-22").kind === "sunday" && dayOf("2026-11-22").decisions.length === 0);
-check("the lead flag is carried on a decision", (await (await keyed("/api/v1/intercom-plan?from=2026-11-21", "key-for-intercom-123")).json()).days[0].decisions.every(d => d.lead === false));
+check("the lead flag is carried on a decision", sat.decisions.find(d => d.name === "Osaid").lead === true && sat.decisions.find(d => d.name === "Ivan").lead === false);
+check("emails: written on the roster entry, else the one allowed email that contains the name, else null", apiBody.roster.find(p => p.name === "Ayeshah").email === "ayeshah@autoleap.com" && apiBody.roster.find(p => p.name === "Cat").email === "cat@example.com" && apiBody.roster.find(p => p.name === "Raza").email === null);
+check("a decision carries the person's email", tue.decisions[0].email === null && sat.decisions.every(d => "email" in d));
+check("the answer says the sheet data came from the stored copy when the sheet cannot be read", apiBody.sources.weekendCover === "stored" && apiBody.sources.rotation === "stored");
 check("the key never appears in an answer", !JSON.stringify(apiBody).includes("key-for"));
 const apiLog = (await (await get("/api/log", boss.session)).json()).log.filter(e => e.event === "api refused");
 check("refused API calls are logged once, without the key", apiLog.length === 1 && !JSON.stringify(apiLog).includes("nope"));
+// live sheet read: the answer follows the sheet, not the stored copy
+const g = (v, f) => (f ? { v, f } : { v });
+const weekendTable = { status: "ok", table: { rows: [
+  { c: ["Weekend", "PLANNED COVER", "", "", "SWAP COVER", "", "", "ACTUAL COVER", "", "", "STATUS"].map(v => g(v)) },
+  { c: ["", "PHASE 1", "VIP", "VIP", "PHASE 1", "VIP", "VIP", "PHASE 1", "VIP", "VIP", ""].map(v => g(v)) },
+  { c: [g("Date(2026,10,21)", "Nov 21, 2026"), g("Laraib"), g("Raza"), g("Ivan"), g(""), g(""), g(""), g("Ammana"), g("Ivan"), g("Osaid"), g("")] }
+] } };
+const vipTable = { status: "ok", table: { rows: [
+  { c: ["#", "START", "END", "PLANNED COVER", "", "SWAP", "", "ACTUAL COVER", ""].map(v => g(v)) },
+  { c: ["", "", "", "LATE SHIFT", "PHASE 1", "LATE SHIFT", "PHASE 1", "LATE SHIFT", "PHASE 1"].map(v => g(v)) },
+  { c: [g("1"), g("Date(2026,10,16)", "Nov 16, 2026"), g("Date(2026,10,27)", "Nov 27, 2026"), g(""), g(""), g(""), g(""), g("Ammana"), g("Ivan")] }
+] } };
+let sheetCalls = 0;
+sheetMock = url => {
+  sheetCalls++;
+  const body = url.includes("gid=1806071421") ? weekendTable : url.includes("gid=1563923804") ? vipTable : null;
+  return body ? new Response("/*O_o*/\ngoogle.visualization.Query.setResponse(" + JSON.stringify(body) + ");") : new Response("no", { status: 404 });
+};
+const liveBody = await (await keyed("/api/v1/intercom-plan?from=2026-11-16&days=8", "key-for-intercom-123")).json();
+const liveDay = d => liveBody.days.find(x => x.date === d);
+check("the sheet is read live on every call and the answer says so", sheetCalls === 2 && liveBody.sources.weekendCover === "sheet" && liveBody.sources.rotation === "sheet");
+check("live rotation: Monday's rotation person is the sheet's (Ivan), not the stored copy's (Raza)", liveDay("2026-11-16").rotationPhase1 === "Ivan");
+check("live weekend names win over the stored ones", liveDay("2026-11-21").decisions.map(d => d.name + ":" + d.queue).join(",") === "Ammana:phase1,Ivan:vip,Osaid:vip" && liveDay("2026-11-21").rotationPhase1 === "Ivan");
+check("an edited day is judged against the live rotation (Raza is no longer the Phase 1 person)", liveDay("2026-11-17").decisions.map(d => d.name).join(",") === "Raza");
+sheetMock = url => (url.includes("gid=1806071421") ? new Response("/*O_o*/\ngoogle.visualization.Query.setResponse(" + JSON.stringify(weekendTable) + ");") : new Response("down", { status: 500 }));
+const half = await (await keyed("/api/v1/intercom-plan?from=2026-11-16&days=8", "key-for-intercom-123")).json();
+check("one tab unreadable: that tab falls back to the stored copy and the answer says which", half.sources.weekendCover === "sheet" && half.sources.rotation === "stored" && half.days.find(d => d.date === "2026-11-16").rotationPhase1 === "Raza");
+sheetMock = () => { throw new Error("network down"); };
+const down = await keyed("/api/v1/intercom-plan?from=2026-11-16&days=8", "key-for-intercom-123");
+check("sheet completely unreachable: the answer still works from the stored plan", down.status === 200 && (await down.json()).sources.weekendCover === "stored");
+sheetMock = () => new Response("forbidden", { status: 403 });
 delete env.API_KEYS;
 check("with no keys configured every call is refused", (await keyed("/api/v1/intercom-plan", "key-for-intercom-123")).status === 401);
 
