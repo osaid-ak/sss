@@ -234,6 +234,11 @@ check("a session from an earlier deploy is rejected", (await get("/api/team/plan
 const stale = await get("/", carl.session);
 check("a stale session sees the sign-in page and its cookie is cleared", (await stale.text()).includes("Sign in with Google") && /sss_session=;.*Max-Age=0/.test(stale.headers.get("Set-Cookie") || ""));
 const again = await signIn("ann@example.com");
+const fullLog = async () => (await (await get("/api/log", again.session)).json()).log;
+const endedLog = await fullLog();
+check("the deploy and the person's ended session are logged", endedLog.some(e => e.event === "deploy" && e.name === "System" && /build 20260102000000/.test(e.detail)) && endedLog.some(e => e.event === "session ended" && e.email === "ann@example.com"));
+await get("/", carl.session);
+check("a second visit with the same old cookie does not add a second deploy line", (await fullLog()).filter(e => e.event === "deploy").length === 1);
 check("signing in again after a deploy works", (await get("/api/team/plan", again.session)).status !== 401);
 delete env.BUILD_ID;
 

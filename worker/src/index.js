@@ -234,6 +234,29 @@ async function sessionEmail(request, env) {
   return (await isAllowed(env, data.e)) ? data.e : null;
 }
 
+// A valid cookie from an earlier deploy: who it was, so the log can say their session ended. Null for anything else.
+async function endedSession(request, env) {
+  const raw = cookies(request)[SESSION_COOKIE];
+  if (!raw || !env.SESSION_SECRET || !env.BUILD_ID) return null;
+  const value = await unsign(raw, env.SESSION_SECRET);
+  if (!value) return null;
+  let data;
+  try { data = JSON.parse(new TextDecoder().decode(b64urlDecode(value))); } catch (e) { return null; }
+  if (!data || !data.e || !data.x || data.x < Date.now() || (data.b || "") === String(env.BUILD_ID)) return null;
+  return data.e;
+}
+// The first request after a deploy writes one line for the deploy, then each person's own line when their old session is met.
+async function logEndedSession(env, request, email) {
+  if (env.ROLES) {
+    const seen = await env.ROLES.get("build");
+    if (seen !== String(env.BUILD_ID)) {
+      await env.ROLES.put("build", String(env.BUILD_ID));
+      await logEvent(env, request, "deploy", "system", "New version live (build " + env.BUILD_ID + "): all sessions ended, everyone signs in again");
+    }
+  }
+  await logEvent(env, request, "session ended", email, "signed out by a new deploy");
+}
+
 const HEADERS = { "Cache-Control": "private, no-store", "X-Robots-Tag": "noindex, nofollow" };
 function page(title, body, status) {
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
@@ -468,7 +491,11 @@ export default {
     if (!email) {
       const page = landing();
       // Drop a session cookie that is no longer valid (for example from an earlier deploy).
-      if (cookies(request)[SESSION_COOKIE]) page.headers.append("Set-Cookie", cookie(SESSION_COOKIE, "", 0));
+      if (cookies(request)[SESSION_COOKIE]) {
+        const ended = await endedSession(request, env);
+        if (ended) await logEndedSession(env, request, ended);
+        page.headers.append("Set-Cookie", cookie(SESSION_COOKIE, "", 0));
+      }
       return page;
     }
     const res = await env.ASSETS.fetch(request);
