@@ -52,6 +52,10 @@ The old page at https://osaid-ak.github.io/sss/ and the old plan address (mantle
 
 Admins and the Super Admin see the latest 500 sign-ins, refused sign-ins, sign-outs and user changes under Access -> Activity log. Each entry has the email, event, time, country, IP address and browser, so sign-ins from a future mobile app can be told apart. Let the team know these are recorded. Sessions are signed cookies that last 7 days; to cut someone off at once, remove them in the Users panel.
 
+## Read API for automations
+
+`GET /api/v1/intercom-plan?from=YYYY-MM-DD&days=N` returns, per shift day, the people a lead moved between Phase 1 and VIP in the calendar. It uses an API key instead of a Google sign-in: `npx wrangler@4 secret put API_KEYS` with `label:key` pairs (`intercom:<64 random hex characters>`, several separated by commas; remove a pair to revoke it). Send `Authorization: Bearer <key>`. Read only, never cached; a refused call is logged once every 10 minutes. The full contract, the Python module and the rollout plan are in `../handoff/intercom/README.md`.
+
 ## Limits
 
 - Admin and Member are enforced by the server for the user list and role changes. Inside the calendar, lead tools follow the role, but a Member's browser can still send schedule edits to the shared plan, because Members must be able to sync it.

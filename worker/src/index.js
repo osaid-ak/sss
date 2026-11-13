@@ -8,6 +8,7 @@
 //   /api/users      Admins: list people (GET) / add, remove, change a role (POST)
 //   /api/log        Admins: recent sign-ins, sign-outs and user changes
 //   /api/team/plan the shared team plan, kept in a Durable Object (signed-in people only)
+//   /api/v1/*      read-only calls for automations, with an API key instead of a Google sign-in (see automationApi)
 //   everything else the calendar page (static asset, signed-in people only)
 //
 // Secrets (set with `wrangler secret put`, never committed):
@@ -15,8 +16,11 @@
 //   ALLOWED_EMAILS  comma-separated: everyone who may sign in
 //   ADMIN_EMAILS    comma-separated: who starts as an Admin (everyone else starts as a Member)
 //   SUPER_ADMIN     one email: always allowed, always the Super Admin, can change Admins' roles
+//   API_KEYS        comma-separated label:key pairs for automations, e.g. intercom:<long random string> (one label per automation, so one can be revoked alone)
 // Role changes, added people and removed people made in the app are kept in the ROLES key-value store. Roles win over ADMIN_EMAILS.
 // ALLOWED_EMAILS is re-read on every request, so removing an email locks that person out immediately.
+
+import { intercomPlan, shiftDayAt, addDaysKey, validDate } from "./intercom.js";
 
 const SESSION_COOKIE = "sss_session";
 const STATE_COOKIE = "sss_state";
@@ -446,6 +450,56 @@ async function planStore(request, env, rest, actorEmail) {
   return new Response(res.body, { status: res.status, headers });
 }
 
+// ---- API keys for automations (read-only)
+async function sha256(text) {
+  return new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(text)));
+}
+// The label of the key in the Authorization header, or null. Compared as hashes in constant time; the keys are never logged or returned.
+async function apiKeyLabel(request, env) {
+  const m = /^Bearer\s+(\S+)$/i.exec(request.headers.get("Authorization") || "");
+  if (!m || !env.API_KEYS) return null;
+  const given = await sha256(m[1]);
+  let found = null;
+  for (const entry of String(env.API_KEYS).split(",")) {
+    const i = entry.indexOf(":");
+    if (i < 1) continue;
+    const want = await sha256(entry.slice(i + 1).trim());
+    let diff = 0;
+    for (let k = 0; k < given.length; k++) diff |= given[k] ^ want[k];
+    if (diff === 0) found = entry.slice(0, i).trim();
+  }
+  return found;
+}
+async function automationApi(request, env, url) {
+  const label = await apiKeyLabel(request, env);
+  if (!label) {
+    // at most one log line every 10 minutes, so a scanner cannot fill the activity log
+    if (env.ROLES) {
+      try {
+        const last = Number(await env.ROLES.get("apifail")) || 0;
+        if (Date.now() - last > 600000) {
+          await env.ROLES.put("apifail", String(Date.now()));
+          await logEvent(env, request, "api refused", "api", "request to " + url.pathname + " without a valid API key");
+        }
+      } catch (e) { /* logging must never break the answer */ }
+    }
+    return json({ error: "a valid API key is required (Authorization: Bearer <key>)" }, 401);
+  }
+  if (request.method !== "GET") return json({ error: "read only" }, 405);
+  if (url.pathname !== "/api/v1/intercom-plan") return json({ error: "not found" }, 404);
+  if (!env.PLAN) return json({ error: "plan store is not configured" }, 500);
+  const now = Date.now();
+  const from = url.searchParams.get("from") || shiftDayAt(now);
+  const days = Number(url.searchParams.get("days") || 8);
+  if (!validDate(from) || !Number.isInteger(days) || days < 1 || days > 31) return json({ error: "from must be YYYY-MM-DD and days 1 to 31" }, 400);
+  const res = await env.PLAN.get(env.PLAN.idFromName("plan")).fetch("https://plan.internal/doc", { method: "GET" });
+  if (!res.ok) return json({ error: "the team plan is empty or unavailable" }, 503);
+  let doc;
+  try { doc = JSON.parse(await res.text()); } catch (e) { return json({ error: "the team plan could not be read" }, 503); }
+  if (!doc || !doc.calendar || typeof doc.calendar !== "object") return json({ error: "the team plan is empty or unavailable" }, 503);
+  return json(intercomPlan(doc, from, days, now));
+}
+
 export default {
   async fetch(request, env) {
     if (!env.SESSION_SECRET || !env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
@@ -453,6 +507,7 @@ export default {
     }
     const url = new URL(request.url);
     const path = url.pathname;
+    if (path.startsWith("/api/v1/")) return automationApi(request, env, url);
     if (path === "/auth/login") return login(request, env);
     if (path === "/auth/callback") return callback(request, env);
     if (path === "/auth/logout") {

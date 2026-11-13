@@ -1,0 +1,136 @@
+{
+  "version": 1,
+  "generatedAt": "2026-11-16T10:00:00.000Z",
+  "planUpdatedAt": "2026-11-16T09:00:00.000Z",
+  "sheetReadAt": "2026-11-16T08:00:00.000Z",
+  "timezone": "UTC+05:00",
+  "boundary": "15:00",
+  "currentShiftDay": "2026-11-16",
+  "roster": [
+    {
+      "name": "Raza",
+      "normalQueue": "vip",
+      "lead": false
+    },
+    {
+      "name": "Ivan",
+      "normalQueue": "vip",
+      "lead": false
+    },
+    {
+      "name": "Ammana",
+      "normalQueue": "vip",
+      "lead": false
+    },
+    {
+      "name": "Jawad",
+      "normalQueue": "vip",
+      "lead": false
+    },
+    {
+      "name": "Osaid",
+      "normalQueue": "vip",
+      "lead": true
+    },
+    {
+      "name": "Ayeshah",
+      "normalQueue": "phase1",
+      "lead": false
+    }
+  ],
+  "days": [
+    {
+      "date": "2026-11-16",
+      "weekday": "Mon",
+      "kind": "weekday",
+      "rotationPhase1": "Jawad",
+      "edited": false,
+      "decisions": [],
+      "boundary": "2026-11-16T15:00:00+05:00"
+    },
+    {
+      "date": "2026-11-17",
+      "weekday": "Tue",
+      "kind": "weekday",
+      "rotationPhase1": "Jawad",
+      "edited": true,
+      "decisions": [
+        {
+          "name": "Ivan",
+          "queue": "phase1",
+          "reason": "day edited by a lead",
+          "lead": false
+        }
+      ],
+      "boundary": "2026-11-17T15:00:00+05:00"
+    },
+    {
+      "date": "2026-11-18",
+      "weekday": "Wed",
+      "kind": "weekday",
+      "rotationPhase1": "Jawad",
+      "edited": false,
+      "decisions": [
+        {
+          "name": "Ammana",
+          "queue": "phase1",
+          "reason": "Phase 1 queue cover",
+          "lead": false
+        }
+      ],
+      "boundary": "2026-11-18T15:00:00+05:00"
+    },
+    {
+      "date": "2026-11-19",
+      "weekday": "Thu",
+      "kind": "weekday",
+      "rotationPhase1": "Jawad",
+      "edited": false,
+      "decisions": [],
+      "boundary": "2026-11-19T15:00:00+05:00"
+    },
+    {
+      "date": "2026-11-20",
+      "weekday": "Fri",
+      "kind": "weekday",
+      "rotationPhase1": "Jawad",
+      "edited": false,
+      "decisions": [],
+      "boundary": "2026-11-20T15:00:00+05:00"
+    },
+    {
+      "date": "2026-11-21",
+      "weekday": "Sat",
+      "kind": "saturday",
+      "rotationPhase1": null,
+      "edited": false,
+      "decisions": [
+        {
+          "name": "Ivan",
+          "queue": "phase1",
+          "reason": "weekend cover",
+          "lead": false
+        }
+      ],
+      "boundary": "2026-11-21T15:00:00+05:00"
+    },
+    {
+      "date": "2026-11-22",
+      "weekday": "Sun",
+      "kind": "sunday",
+      "rotationPhase1": null,
+      "edited": false,
+      "decisions": [],
+      "boundary": "2026-11-22T15:00:00+05:00"
+    },
+    {
+      "date": "2026-11-23",
+      "weekday": "Mon",
+      "kind": "weekday",
+      "rotationPhase1": "Jawad",
+      "edited": false,
+      "decisions": [],
+      "boundary": "2026-11-23T15:00:00+05:00"
+    }
+  ]
+}

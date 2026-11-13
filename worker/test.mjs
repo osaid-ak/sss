@@ -242,5 +242,55 @@ check("a second visit with the same old cookie does not add a second deploy line
 check("signing in again after a deploy works", (await get("/api/team/plan", again.session)).status !== 401);
 delete env.BUILD_ID;
 
+// 6. read-only API for automations (API key, not a Google sign-in)
+env.API_KEYS = "intercom:key-for-intercom-123, other:key-for-other-456";
+const keyed = (path, key, method) => worker.fetch(new Request(ORIGIN + path, { method: method || "GET", headers: key ? { Authorization: "Bearer " + key } : {} }), env);
+const who = await signIn("ann@example.com");
+const rp = (name, extra) => person(name, extra);
+const apiCal = {
+  people: [
+    rp("Raza"), rp("Ivan"), rp("Ammana"),
+    rp("Osaid", { roles: { lead: true, vip: true }, group: "Leads" }),
+    rp("Ayeshah", { roles: { phase1: true }, queue: "phase1", group: "Phase 1" })
+  ],
+  lineBars: [], leaves: [], holidays: [], sheetPlan: { line: [], hours: {}, readAt: "" },
+  vipPlan: { blocks: [{ start: "2026-11-16", end: "2026-11-27", late: "Ammana", phase1: "Raza", cover1: "", cover2: "" }], readAt: "2026-11-14T08:00:00.000Z" },
+  // Tue 17: a lead edited the day and moved Ivan to Phase 1 (Raza is the rotation's Phase 1 person, so he is normal)
+  days: {
+    "2026-11-17": { people: [rp("Raza", { roles: { phase1: true } }), rp("Ivan", { roles: { phase1: true } }), rp("Ammana"), rp("Ayeshah", { roles: { phase1: true } })], lineBars: [] },
+    // Sat 21: weekend cover names Ivan for Phase 1
+    "2026-11-21": { people: [], lineBars: [], weekendCover: { phase1: "Ivan", vip: ["Raza", "Osaid"] } }
+  },
+  // Wed 18: a Phase 1 queue cover (Ammana, VIP) and a VIP late shift cover that changes nothing (Ivan is VIP already)
+  lateCover: { "2026-11-18": { p1q: "Ammana", vip: "Ivan" } }
+};
+await putPlan(who.session, { version: 1, updatedAt: "2026-11-14T10:00:00.000Z", parts: 1, calendar: apiCal });
+check("API without a key is refused", (await keyed("/api/v1/intercom-plan")).status === 401);
+check("API with a wrong key is refused", (await keyed("/api/v1/intercom-plan", "nope")).status === 401);
+check("a signed-in session is not an API key", (await get("/api/v1/intercom-plan", who.session)).status === 401);
+check("API is read only", (await keyed("/api/v1/intercom-plan", "key-for-intercom-123", "POST")).status === 405);
+check("an unknown API path is 404", (await keyed("/api/v1/other", "key-for-intercom-123")).status === 404);
+check("a second key works too", (await keyed("/api/v1/intercom-plan?from=2026-11-16", "key-for-other-456")).status === 200);
+check("bad dates and day counts are 400", (await keyed("/api/v1/intercom-plan?from=2026-13-40", "key-for-intercom-123")).status === 400 && (await keyed("/api/v1/intercom-plan?days=0", "key-for-intercom-123")).status === 400 && (await keyed("/api/v1/intercom-plan?days=32", "key-for-intercom-123")).status === 400);
+const apiRes = await keyed("/api/v1/intercom-plan?from=2026-11-16&days=8", "key-for-intercom-123");
+const apiBody = await apiRes.json();
+const dayOf = d => apiBody.days.find(x => x.date === d);
+check("API answers with the contract fields", apiRes.status === 200 && apiBody.version === 1 && apiBody.days.length === 8 && apiBody.boundary === "15:00" && apiBody.planUpdatedAt === "2026-11-14T10:00:00.000Z" && apiBody.sheetReadAt === "2026-11-14T08:00:00.000Z" && apiRes.headers.get("Cache-Control") === "private, no-store");
+check("roster lists each person's normal queue and who is a lead", apiBody.roster.find(p => p.name === "Osaid").lead === true && apiBody.roster.find(p => p.name === "Ayeshah").normalQueue === "phase1" && apiBody.roster.find(p => p.name === "Ivan").normalQueue === "vip");
+check("Monday: nothing decided, the rotation person is named", dayOf("2026-11-16").decisions.length === 0 && dayOf("2026-11-16").rotationPhase1 === "Raza" && dayOf("2026-11-16").kind === "weekday" && dayOf("2026-11-16").boundary === "2026-11-16T15:00:00+05:00");
+const tue = dayOf("2026-11-17");
+check("edited day: only the person the lead moved is a decision", tue.edited === true && tue.decisions.length === 1 && tue.decisions[0].name === "Ivan" && tue.decisions[0].queue === "phase1" && tue.decisions[0].reason === "day edited by a lead");
+const wed = dayOf("2026-11-18");
+check("Phase 1 queue cover is a decision and a late cover that changes nothing is not", wed.decisions.length === 1 && wed.decisions[0].name === "Ammana" && wed.decisions[0].queue === "phase1" && wed.decisions[0].reason === "Phase 1 queue cover");
+const sat = dayOf("2026-11-21");
+check("Saturday: no rotation, weekend cover Phase 1 person is a decision, VIP names are normal", sat.kind === "saturday" && sat.rotationPhase1 === null && sat.decisions.length === 1 && sat.decisions[0].name === "Ivan" && sat.decisions[0].queue === "phase1" && sat.decisions[0].reason === "weekend cover");
+check("Sunday is closed: nothing decided", dayOf("2026-11-22").kind === "sunday" && dayOf("2026-11-22").decisions.length === 0);
+check("the lead flag is carried on a decision", (await (await keyed("/api/v1/intercom-plan?from=2026-11-21", "key-for-intercom-123")).json()).days[0].decisions.every(d => d.lead === false));
+check("the key never appears in an answer", !JSON.stringify(apiBody).includes("key-for"));
+const apiLog = (await (await get("/api/log", boss.session)).json()).log.filter(e => e.event === "api refused");
+check("refused API calls are logged once, without the key", apiLog.length === 1 && !JSON.stringify(apiLog).includes("nope"));
+delete env.API_KEYS;
+check("with no keys configured every call is refused", (await keyed("/api/v1/intercom-plan", "key-for-intercom-123")).status === 401);
+
 console.log(failed ? failed + " failed" : "all passed");
 process.exit(failed ? 1 : 0);
