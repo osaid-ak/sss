@@ -259,6 +259,16 @@
   /* keyboard focus is always visible */
   :focus-visible { outline: 2px solid var(--phase); outline-offset: 2px; }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .health {
+    display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+    font-size: 11px; font-weight: 800; font-style: normal; line-height: 1; margin-left: 8px; vertical-align: middle;
+  }
+  .health.h-ok { background: var(--phase-soft); color: var(--ok); }
+  .health.h-thin { background: var(--thin-bg); color: var(--thin); }
+  .health.h-gap { background: var(--gap-bg); color: var(--gap); }
+  .month-legend { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 10px 2px 2px; font-size: 12px; color: var(--muted); }
+  .month-legend span { display: inline-flex; align-items: center; }
+  .month-legend .health { margin: 0 6px 0 0; }
   /* needs-attention chip and list */
   .attn {
     border: 1px solid var(--gap); background: var(--gap-bg); color: var(--gap);
@@ -868,7 +878,7 @@
     .dnum-dow { display: inline; margin-left: 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
     .month-grid, .week-grid,
     .month-grid.hide-closed, .week-grid.hide-closed { grid-template-columns: 1fr; }
-    .nav-title { min-width: 96px; flex: 1 0 96px; }
+    .nav-title { min-width: 132px; flex: 1 0 132px; }
     .nav { width: 100%; }
     .nav-title strong { font-size: 17px; white-space: nowrap; }
     .nav { flex-wrap: wrap; }
@@ -4233,7 +4243,8 @@
         onVip: nVip,
         onLine: 0,
         gap: nPhase === 0 || nVip < 2,
-        thin: nVip === 1
+        thin: nVip === 1,
+        healthNote: [nPhase === 0 ? "No Phase 1 on the weekend" : "", nVip === 0 ? "No VIP on the weekend" : nVip === 1 ? "Only one VIP on the weekend" : ""].filter(Boolean).join(" · ")
       };
     }
     const peakWin = peakWindow(key);
@@ -4258,7 +4269,21 @@
         }
       });
     }
+    // Why a night is amber or red, in plain words, for the month markers.
+    const healthNotes = [];
+    // The Support Line is one person per slot by design, so only an empty slot counts there; Phase 1 and VIP are thin at one.
+    let healthThin = false;
+    const level = (arr, name, where, oneIsThin) => {
+      if (arr.some(v => v === 0)) healthNotes.push("No " + name + " for part of the " + where);
+      else if (oneIsThin && arr.some(v => v === 1)) { healthThin = true; healthNotes.push("Only one on " + name + " for part of the " + where); }
+    };
+    level(peakPhase, "Phase 1", "peak window", true);
+    level(peakVip, "VIP", "peak window", true);
+    level(lineSpan, "Support Line", "Support Line window", false);
+    if (ui.leadAccess) late.missing.forEach(kind => healthNotes.push("Late shift has no " + names[kind] + " person"));
     return {
+      healthThin,
+      healthNote: healthNotes.join(" · "),
       actionNeeded: notes.length > 0,
       actionNote: notes.join(" · "),
       lateMissing: late.missing,
@@ -4645,6 +4670,17 @@
   function needsAction(cov, d, today) {
     return !!(ui.leadAccess && cov && cov.actionNeeded && !isPastNight(d, today));
   }
+  // One small marker per upcoming night: a tick when covered, ! when only one person holds some slots, a cross when a slot has nobody.
+  // The shape says it as well as the colour. Past nights, closed days and weekends still waiting for Actual Cover get none.
+  function healthHtml(cov, d, today) {
+    if (!cov || cov.closed || isPastNight(d, today)) return "";
+    if (cov.weekend && !cov.onPhase && !cov.onVip) return "";
+    const state = cov.gap ? "gap" : (cov.weekend ? cov.thin : cov.healthThin) ? "thin" : "ok";
+    const symbol = { ok: "✓", thin: "!", gap: "✕" }[state];
+    const words = { ok: "Covered all night", thin: "Thin cover", gap: "Gap in cover" }[state];
+    const title = words + (cov.healthNote ? ": " + cov.healthNote : "");
+    return `<span class="health h-${state}" role="img" aria-label="${esc(title)}" title="${esc(title)}">${symbol}</span>`;
+  }
   function renderMonth() {
     const y = ui.cursor.getFullYear(), m = ui.cursor.getMonth();
     const first = new Date(y, m, 1);
@@ -4661,12 +4697,12 @@
       const dim = hasActiveFilter() && !hit;
       html += `<button type="button" class="daycell ${needsAction(cov, d, today) ? "needs-action" : ""} ${out ? "out" : ""} ${sameDay(d, today) ? "today" : ""} ${isPastNight(d, today) ? "past" : ""} ${!dim && cov.weekend ? "weekend" : ""} ${dim ? "dim" : toneClass(cov)}" data-open-day="${key}">
         ${needsAction(cov, d, today) ? `<span class="action-badge" title="${esc(cov.actionNote)}">Lead action</span>` : ""}
-        <div class="dnum">${d.getDate()}<span class="dnum-dow">${d.toLocaleDateString(undefined, { weekday: "short" })}</span></div>
+        <div class="dnum">${d.getDate()}<span class="dnum-dow">${d.toLocaleDateString(undefined, { weekday: "short" })}</span>${out || dim ? "" : healthHtml(cov, d, today)}</div>
         ${dim ? "" : chipsHtml(cov)}
         ${dim ? "" : cellNamesHtml(key)}
       </button>`;
     }
-    return html + "</div>";
+    return html + `</div><div class="month-legend" aria-hidden="true"><span><i class="health h-ok">✓</i> Covered all night</span><span><i class="health h-thin">!</i> Only one person for part of the night</span><span><i class="health h-gap">✕</i> Nobody for part of the night</span></div>`;
   }
 
   function weekTone(p) {
