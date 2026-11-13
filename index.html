@@ -1245,10 +1245,9 @@
       lineBars: clone(DEFAULT_LINE),
       leaves: [],
       holidays: [],
-      vipPlan: { blocks: [] },
+      vipPlan: { blocks: [], readAt: "" },
       lateCover: {},
-      anchorCover: {},
-      sheetPlan: { line: [], hours: {} },
+      sheetPlan: { line: [], hours: {}, readAt: "" },
       days: {},
       dst: false
     };
@@ -1436,22 +1435,8 @@
     });
     return out;
   }
-  // Replacements for anchor shifts, one entry per VIP block (keyed by the block's first date).
-  function sanitizeAnchorCover(raw) {
-    const out = {};
-    if (!raw || typeof raw !== "object") return out;
-    Object.keys(raw).forEach(key => {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return;
-      const v = raw[key] || {};
-      const entry = {};
-      if (v.late && String(v.late).trim()) entry.late = String(v.late).trim();
-      if (v.phase1 && String(v.phase1).trim()) entry.phase1 = String(v.phase1).trim();
-      if (entry.late || entry.phase1) out[key] = entry;
-    });
-    return out;
-  }
   function sanitizeSheetPlan(raw) {
-    const out = { line: [], hours: {} };
+    const out = { line: [], hours: {}, readAt: String((raw && raw.readAt) || "") };
     const key = /^\d{4}-\d{2}-\d{2}$/;
     ((raw && raw.line) || []).forEach(b => {
       if (!b || !key.test(b.start) || !key.test(b.end) || b.end < b.start || !Array.isArray(b.slots)) return;
@@ -1478,10 +1463,12 @@
       start: String((b && b.start) || ""),
       end: String((b && b.end) || ""),
       late: String((b && b.late) || "").trim(),
-      phase1: String((b && b.phase1) || "").trim()
+      phase1: String((b && b.phase1) || "").trim(),
+      cover1: String((b && b.cover1) || "").trim(),
+      cover2: String((b && b.cover2) || "").trim()
     })).filter(b => key.test(b.start) && key.test(b.end) && b.end >= b.start && (b.late || b.phase1));
     blocks.sort((a, b) => a.start.localeCompare(b.start));
-    return { blocks };
+    return { blocks, readAt: String((raw && raw.readAt) || "") };
   }
   function sanitizeData(raw) {
     const d = defaultData();
@@ -1543,7 +1530,6 @@
     });
     d.vipPlan = sanitizeVipPlan(raw.vipPlan);
     d.lateCover = sanitizeLateCover(raw.lateCover);
-    d.anchorCover = sanitizeAnchorCover(raw.anchorCover);
     d.sheetPlan = sanitizeSheetPlan(raw.sheetPlan);
     d.updatedAt = typeof raw.updatedAt === "string" ? raw.updatedAt : "";
     d.dst = false;
@@ -1733,6 +1719,13 @@
     delete copy.pin;
     return copy;
   }
+  // Data read from a Google Sheet tab (the VIP blocks with their anchor cover, the Support Line rotation and hours) is the same for everyone.
+  // Which copy wins is decided by when the sheet last changed (readAt), not by when someone last edited the plan, so a stale copy
+  // in the shared plan can never put back an older version of the sheet.
+  function freshestRead(remote, local) {
+    const r = (remote && remote.readAt) || "", l = (local && local.readAt) || "";
+    return l > r ? local : (remote || local);
+  }
   function mergeTeam(base, remote, local, remoteAt, localAt) {
     return {
       people: mergeRecords(base && base.people, remote && remote.people, local && local.people, remoteAt, localAt, item => item && item.name),
@@ -1740,10 +1733,9 @@
       leaves: mergeRecords(base && base.leaves, remote && remote.leaves, local && local.leaves, remoteAt, localAt, item => item && item.id),
       holidays: mergeRecords(base && base.holidays, remote && remote.holidays, local && local.holidays, remoteAt, localAt, item => item && item.id),
       days: mergeDays(base && base.days, remote && remote.days, local && local.days, remoteAt, localAt),
-      vipPlan: pickField(base && base.vipPlan, remote && remote.vipPlan, local && local.vipPlan, remoteAt, localAt),
+      vipPlan: freshestRead(remote && remote.vipPlan, local && local.vipPlan),
       lateCover: mergeDays(base && base.lateCover, remote && remote.lateCover, local && local.lateCover, remoteAt, localAt),
-      anchorCover: mergeDays(base && base.anchorCover, remote && remote.anchorCover, local && local.anchorCover, remoteAt, localAt),
-      sheetPlan: pickField(base && base.sheetPlan, remote && remote.sheetPlan, local && local.sheetPlan, remoteAt, localAt),
+      sheetPlan: freshestRead(remote && remote.sheetPlan, local && local.sheetPlan),
       dst: false,
       slotOrigin: START_MIN
     };
@@ -2339,6 +2331,9 @@
       return { late: c, phase1: c + 1 };
     };
     const planned = pair(plannedAt), swap = pair(swapAt), actual = pair(actualAt);
+    // Anchor Cover 1 and 2 (columns K and L) are labelled in the row under the group header.
+    const cover1At = Math.max(subRow.findIndex(c => label(c) === "ANCHOR 1"), -1);
+    const cover2At = Math.max(subRow.findIndex(c => label(c) === "ANCHOR 2"), -1);
     const blocks = [];
     for (let i = headerIndex + 2; i < rows.length; i++) {
       const row = rows[i];
@@ -2349,7 +2344,11 @@
       const late = name(actual, "late") || name(swap, "late") || name(planned, "late");
       const phase1 = name(actual, "phase1") || name(swap, "phase1") || name(planned, "phase1");
       if (!late && !phase1) continue;
-      blocks.push({ start: dates[0], end: dates[1], late, phase1 });
+      blocks.push({
+        start: dates[0], end: dates[1], late, phase1,
+        cover1: cover1At >= 0 ? weekendCell(row, cover1At) : "",
+        cover2: cover2At >= 0 ? weekendCell(row, cover2At) : ""
+      });
     }
     return blocks;
   }
@@ -2384,13 +2383,16 @@
     return fetchGvizRows(VIP_SHEET_GID)
       .then(rows => {
         const blocks = parseVipPlanRows(rows).map(b => ({
-          start: b.start, end: b.end, late: matchRosterName(b.late), phase1: matchRosterName(b.phase1)
+          start: b.start, end: b.end, late: matchRosterName(b.late), phase1: matchRosterName(b.phase1),
+          cover1: matchRosterName(b.cover1), cover2: matchRosterName(b.cover2)
         }));
         const next = sanitizeVipPlan({ blocks });
         if (!next.blocks.length) throw new Error("No coverage blocks were found on the VIP Coverage Plan tab.");
         vipSync.last = new Date().toISOString();
         vipSync.error = "";
-        if (sameJson(next, sanitizeVipPlan(data.vipPlan))) return 0;
+        const noStamp = o => Object.assign({}, o, { readAt: "" });
+        if (sameJson(noStamp(next), noStamp(sanitizeVipPlan(data.vipPlan)))) return 0;
+        next.readAt = new Date().toISOString();
         data.vipPlan = next;
         persistQuiet();
         render();
@@ -2405,9 +2407,10 @@
 
   const sheetPanel = { open: false, loaded: false, timer: 0 };
   // The whole workbook opens on the Weekend Cover tab. People switch tabs inside the sheet.
-  function sheetUrl(embedded) {
-    return "https://docs.google.com/spreadsheets/d/" + WEEKEND_SHEET_ID + "/edit?gid=" + WEEKEND_SHEET_GID +
-      (embedded ? "&rm=minimal" : "") + "#gid=" + WEEKEND_SHEET_GID;
+  function sheetUrl(embedded, gid) {
+    gid = gid || WEEKEND_SHEET_GID;
+    return "https://docs.google.com/spreadsheets/d/" + WEEKEND_SHEET_ID + "/edit?gid=" + gid +
+      (embedded ? "&rm=minimal" : "") + "#gid=" + gid;
   }
   function pullSheets() {
     return Promise.all([pullWeekendCover(), pullVipPlan(), pullSheetPlan()]);
@@ -2422,14 +2425,16 @@
     document.getElementById("sheetBtn").classList.remove("on");
     pullSheets();
   }
-  function openSheetPanel() {
-    if (sheetPanel.open) { closeSheetPanel(); return; }
+  // With a tab id (gid) the sheet opens on that tab; without one the button toggles the panel on the Weekend Cover tab.
+  function openSheetPanel(gid) {
+    if (!gid && sheetPanel.open) { closeSheetPanel(); return; }
     closePops();
     sheetPanel.open = true;
     document.getElementById("sheetTitle").textContent = "Shift Sheet";
-    document.getElementById("sheetOpenLink").href = sheetUrl(false);
-    if (!sheetPanel.loaded) {
-      document.getElementById("sheetFrame").src = sheetUrl(true);
+    document.getElementById("sheetOpenLink").href = sheetUrl(false, gid);
+    if (!sheetPanel.loaded || gid) {
+      sheetPanel.gid = gid || null;
+      document.getElementById("sheetFrame").src = sheetUrl(true, gid);
       sheetPanel.loaded = true;
     }
     document.getElementById("sheetPanel").classList.remove("hidden");
@@ -2524,13 +2529,15 @@
         if (!next.line.length && !Object.keys(next.hours).length) throw new Error("Nothing readable was found on the Phase 1 / Support Line tab.");
         // A failed read keeps the last copy: if the rotation could not be read this time, keep the one we had.
         const had = (data.sheetPlan && data.sheetPlan.line) || [];
+        planSync.error = "";
         if (!next.line.length && had.length) {
           next.line = had;
           planSync.error = "Could not read the Support Line rotation dates; kept the last copy.";
         }
         planSync.last = new Date().toISOString();
-        planSync.error = "";
-        if (sameJson(next, sanitizeSheetPlan(data.sheetPlan))) return 0;
+        const noStamp = o => Object.assign({}, o, { readAt: "" });
+        if (sameJson(noStamp(next), noStamp(sanitizeSheetPlan(data.sheetPlan)))) return 0;
+        next.readAt = new Date().toISOString();
         data.sheetPlan = next;
         persistQuiet();
         render();
@@ -3934,8 +3941,9 @@
       }
     });
   }
-  // Anchor shifts (summer clocks): 5pm-2am, 6pm-3am, 8pm-5am. Each must always be held by someone.
-  const ANCHORS = [{ start: 4, len: 18 }, { start: 6, len: 18 }, { start: 10, len: 18 }];
+  // The three anchor shifts the VIP sheet names: 5PM-2AM, 6PM-3AM and 8PM-5AM on its current (standard-time) clock. They are the three
+  // single-person shifts (Osaid, Raza, Jawad). Stored on the summer schedule that is slots 2, 4 and 8, so the page follows DST by itself.
+  const ANCHORS = [{ start: 2, len: 18 }, { start: 4, len: 18 }, { start: 8, len: 18 }];
   // When the block's Late Shift or Phase 1 person normally works an anchor shift, that anchor is vacated for the block.
   function anchorGaps(key) {
     if (isClosedDay(key) || isSaturday(key) || data.days[key]) return [];
@@ -3949,16 +3957,19 @@
       const p = name && base.find(x => x.name === name);
       if (!p) return;
       const a = ANCHORS.find(x => x.start === p.start && x.len === p.len);
-      // Anchor shifts are VIP seats: another VIP rep on the same shift still holds it. Phase 1 reps on those hours do not.
-      const held = base.some(x => x.name !== blk.late && x.name !== blk.phase1 && !rolesOf(x).lead && rolesOf(x).vip && x.start === p.start && x.len === p.len);
-      if (a && !held) gaps.push({ kind, person: name, start: a.start + off, len: a.len, brk: p.brk - p.start, block: blk.start });
+      if (a) gaps.push({ kind, person: name, start: a.start + off, len: a.len, brk: p.brk - p.start, block: blk.start });
     });
     return gaps;
   }
-  function anchorCoverFor(blockStart) { return (data.anchorCover && data.anchorCover[blockStart]) || {}; }
+  // Anchor Cover 1 (column K) covers the Late Shift person's vacated anchor, Anchor Cover 2 (column L) the Phase 1 person's.
+  // They are read from the VIP Coverage Plan sheet, which is where the team fills them in.
+  function anchorCoverFor(key) {
+    const b = vipBlockFor(key);
+    return { late: (b && b.cover1) || "", phase1: (b && b.cover2) || "" };
+  }
   function applyAnchorCover(people, key) {
     anchorGaps(key).forEach(g => {
-      const name = anchorCoverFor(g.block)[g.kind];
+      const name = anchorCoverFor(key)[g.kind];
       const p = name && people.find(x => x.name === name);
       if (!p) return;
       p.split = null;
@@ -4257,7 +4268,7 @@
     const names = { vip: "VIP", phase1: "Phase 1" };
     late.missing.forEach(kind => notes.push("Late shift needs a " + names[kind] + " person"));
     anchorGaps(key).forEach(g => {
-      if (!anchorCoverFor(g.block)[g.kind]) notes.push("Anchor shift " + anchorLabel(g) + " VIP is uncovered");
+      if (!anchorCoverFor(key)[g.kind]) notes.push("Anchor shift " + anchorLabel(g) + " VIP is uncovered");
     });
     const pq = phaseQueueNeed(away, key);
     if (pq) notes.push("Phase 1 needs cover: " + pq + " is off");
@@ -4825,8 +4836,8 @@
     if (c.phase1) out.push({ name: c.phase1, kind: "late", for: absentFor("phase1"), what: "the Phase 1 late shift " + range });
     if (c.p1q) out.push({ name: c.p1q, kind: "queue", for: blk.phase1 || "", what: "Phase 1" });
     anchorGaps(key).forEach(g => {
-      const name = anchorCoverFor(g.block)[g.kind];
-      if (name) out.push({ name, kind: "anchor", for: g.person, what: "the " + anchorLabel(g) + " VIP shift" });
+      const name = anchorCoverFor(key)[g.kind];
+      if (name && day.people.some(x => x.name === name)) out.push({ name, kind: "anchor", for: g.person, what: "the " + anchorLabel(g) + " VIP shift" });
     });
     const rot = lineRotationFor(key);
     if (rot) {
@@ -4862,7 +4873,7 @@
   // Everyone already used as cover on this night or in this block, so nobody is given two jobs.
   function committedNames(key) {
     const c = lateCoverFor(key) || {};
-    const a = anchorCoverFor((vipBlockFor(key) || {}).start);
+    const a = anchorCoverFor(key);
     return new Set([c.vip, c.phase1, c.p1q, a.late, a.phase1].filter(Boolean));
   }
   function coverPicker(pickAttr, addAttr, kind, label, people, withHours) {
@@ -4889,17 +4900,10 @@
       lines.push(`<div class="late-line"><strong>Late shift ${range} needs a ${kindName[kind]} person.</strong>${who} ${control}</div>`);
     });
     if (lead) anchorGaps(key).forEach(g => {
-      const chosen = anchorCoverFor(g.block)[g.kind];
+      if (anchorCoverFor(key)[g.kind]) return;
       const role = g.kind === "late" ? "Late Shift" : "Phase 1";
-      if (chosen) {
-        lines.push(`<div class="late-line"><span class="late-ok">Anchor shift ${anchorLabel(g)} VIP (${esc(g.person)} is on ${role} this block): covered by <b>${esc(chosen)}</b></span>` +
-          `<button type="button" class="ghost" data-anchor-remove="${g.kind}">Remove</button></div>`);
-        return;
-      }
-      const blk = vipBlockFor(key) || {};
-      const control = coverPicker("data-anchor-pick", "data-anchor-add", g.kind, "Anchor shift cover",
-        day.people.filter(p => !rolesOf(p).lead && rolesOf(p).vip && p.name !== blk.late && p.name !== blk.phase1 && !committed.has(p.name)), false);
-      lines.push(`<div class="late-line"><strong>Anchor shift ${anchorLabel(g)} VIP is uncovered.</strong> ${esc(g.person)} is on ${role} this block. Add a VIP rep to work this shift. ${control}</div>`);
+      lines.push(`<div class="late-line"><strong>Anchor shift ${anchorLabel(g)} VIP is uncovered.</strong> ${esc(g.person)} is on ${role} this block. Add a VIP rep under Anchor ${g.kind === "late" ? "1" : "2"} on the VIP Coverage Plan sheet. ` +
+        `<button type="button" class="primary" data-open-vip-sheet>Open the sheet</button></div>`);
     });
     const pqOff = lead ? phaseQueueNeed(day.away, key) : null;
     if (pqOff) {
@@ -5007,31 +5011,8 @@
         toast(sel.value + " added as cover.", { undo: () => { data.lateCover = JSON.parse(before); persist(); render(); } });
       });
     });
-    document.querySelectorAll("[data-anchor-add]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const kind = btn.dataset.anchorAdd;
-        const sel = document.querySelector('[data-anchor-pick="' + kind + '"]');
-        const blk = vipBlockFor(dateKey(ui.cursor));
-        if (!sel || !sel.value || !blk) return;
-        const before = JSON.stringify(data.anchorCover || {});
-        data.anchorCover = data.anchorCover || {};
-        data.anchorCover[blk.start] = Object.assign({}, data.anchorCover[blk.start] || {}, { [kind]: sel.value });
-        persist();
-        render();
-        toast(sel.value + " added as anchor shift cover.", { undo: () => { data.anchorCover = JSON.parse(before); persist(); render(); } });
-      });
-    });
-    document.querySelectorAll("[data-anchor-remove]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const blk = vipBlockFor(dateKey(ui.cursor));
-        if (!blk || !data.anchorCover || !data.anchorCover[blk.start]) return;
-        const before = JSON.stringify(data.anchorCover);
-        delete data.anchorCover[blk.start][btn.dataset.anchorRemove];
-        if (!data.anchorCover[blk.start].late && !data.anchorCover[blk.start].phase1) delete data.anchorCover[blk.start];
-        persist();
-        render();
-        toast("Anchor shift cover removed.", { undo: () => { data.anchorCover = JSON.parse(before); persist(); render(); } });
-      });
+    document.querySelectorAll("[data-open-vip-sheet]").forEach(btn => {
+      btn.addEventListener("click", () => openSheetPanel(VIP_SHEET_GID));
     });
     document.querySelectorAll("[data-late-remove]").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -7175,10 +7156,10 @@
     download("shift-plan-" + viewName + "-" + dateKey(ui.cursor) + ".html", "<!DOCTYPE html>\n" + html, "text/html");
   }
 
-  document.getElementById("sheetBtn").addEventListener("click", openSheetPanel);
+  document.getElementById("sheetBtn").addEventListener("click", () => openSheetPanel());
   document.getElementById("sheetCloseBtn").addEventListener("click", closeSheetPanel);
   document.getElementById("sheetReloadBtn").addEventListener("click", () => {
-    if (sheetPanel.open) document.getElementById("sheetFrame").src = sheetUrl(true);
+    if (sheetPanel.open) document.getElementById("sheetFrame").src = sheetUrl(true, sheetPanel.gid);
   });
   ["viewTabs", "prevBtn", "nextBtn", "todayBtn", "closedToggle"].forEach(id => {
     document.getElementById(id).addEventListener("click", closeSheetPanel);
