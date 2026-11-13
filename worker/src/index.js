@@ -102,24 +102,120 @@ async function roleOf(env, email, stored) {
 
 // Activity log: sign-ins, refused sign-ins, sign-outs and user changes. Newest 500 are kept in the ROLES store.
 // Each entry holds the email, the event, the time, the country, the IP address and the browser (User-Agent, shortened).
-const LOG_KEEP = 500;
-async function logEvent(env, request, event, email, detail) {
-  if (!env.ROLES) return;
+const LOG_KEEP = 1000;
+// "muhammad.jawad@autoleap.com" -> "Muhammad Jawad"
+function displayName(email) {
+  const local = String(email || "").split("@")[0];
+  return local.split(/[._-]+/).filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join(" ");
+}
+async function logEvents(env, request, email, items) {
+  if (!env.ROLES || !items.length) return;
   try {
     let list = [];
     try { list = JSON.parse((await env.ROLES.get("log")) || "[]") || []; } catch (e) { list = []; }
-    const entry = { t: new Date().toISOString(), event, email: String(email || "").toLowerCase() };
-    if (detail) entry.detail = detail;
     const country = request && request.headers.get("CF-IPCountry");
-    if (country) entry.country = country;
     const ip = request && request.headers.get("CF-Connecting-IP");
-    if (ip) entry.ip = ip;
     const ua = request && request.headers.get("User-Agent");
-    if (ua) entry.ua = ua.slice(0, 200);
-    list.push(entry);
+    const t = new Date().toISOString();
+    items.forEach(it => {
+      const entry = { t, event: it.event, email: String(email || "").toLowerCase(), name: displayName(email) };
+      if (it.detail) entry.detail = it.detail;
+      if (country) entry.country = country;
+      if (ip) entry.ip = ip;
+      if (ua) entry.ua = ua.slice(0, 200);
+      list.push(entry);
+    });
     if (list.length > LOG_KEEP) list = list.slice(list.length - LOG_KEEP);
     await env.ROLES.put("log", JSON.stringify(list));
-  } catch (e) { /* logging must never break sign-in */ }
+  } catch (e) { /* logging must never break sign-in or saving */ }
+}
+function logEvent(env, request, event, email, detail) {
+  return logEvents(env, request, email, [{ event, detail }]);
+}
+
+// ---- what changed in a plan save, in plain words
+// Only things people do by hand are compared. Data read from the Google Sheet (VIP blocks, Support Line rotation, Saturday names) is skipped.
+const MONTHS3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const WEEKDAYS3 = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function dayLabel(key) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key));
+  if (!m) return String(key);
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return WEEKDAYS3[d.getUTCDay()] + " " + d.getUTCDate() + " " + MONTHS3[d.getUTCMonth()];
+}
+const same = (a, b) => JSON.stringify(a === undefined ? null : a) === JSON.stringify(b === undefined ? null : b);
+function byKey(list, key) {
+  const out = {};
+  (Array.isArray(list) ? list : []).forEach(x => { if (x && x[key] != null) out[x[key]] = x; });
+  return out;
+}
+function planChanges(prev, next) {
+  const out = [];
+  if (!next || typeof next !== "object") return out;
+  if (!prev) return ["Started the team plan"];
+  // roster
+  const pp = byKey(prev.people, "name"), np = byKey(next.people, "name");
+  Object.keys(np).forEach(n => {
+    if (!pp[n]) { out.push("Added " + n + " to the roster"); return; }
+    const a = pp[n], b = np[n];
+    if (!same([a.start, a.len, a.brk, a.split], [b.start, b.len, b.brk, b.split])) out.push("Changed " + n + "'s shift or break");
+    if (!same([a.roles, a.queue, a.group], [b.roles, b.queue, b.group])) out.push("Changed " + n + "'s roles");
+  });
+  Object.keys(pp).forEach(n => { if (!np[n]) out.push("Removed " + n + " from the roster"); });
+  if (!same(prev.lineBars, next.lineBars)) out.push("Changed the default Support Line bars");
+  // leave requests and approvals (leave created by a holiday plan is reported with that plan)
+  const pl = byKey(prev.leaves, "id"), nl = byKey(next.leaves, "id");
+  const span = l => l.start === l.end ? dayLabel(l.start) : dayLabel(l.start) + " to " + dayLabel(l.end);
+  Object.keys(nl).forEach(id => {
+    const l = nl[id];
+    if (/^Holiday plan/i.test(String(l.note || ""))) return;
+    const old = pl[id];
+    if (!old) { out.push((l.status === "pending" ? "Requested leave for " : "Added " + (l.status || "") + " leave for ") + l.name + " (" + span(l) + ")"); return; }
+    if (old.status !== l.status) {
+      const verb = { approved: "Approved", declined: "Declined", rejected: "Declined", cancelled: "Cancelled", pending: "Reopened" }[l.status] || "Changed";
+      out.push(verb + " leave for " + l.name + " (" + span(l) + ")");
+    } else if (!same([old.start, old.end, old.name], [l.start, l.end, l.name])) out.push("Changed leave for " + l.name + " (" + span(l) + ")");
+  });
+  Object.keys(pl).forEach(id => {
+    const l = pl[id];
+    if (!nl[id] && !/^Holiday plan/i.test(String(l.note || ""))) out.push("Deleted leave for " + l.name + " (" + span(l) + ")");
+  });
+  // holiday plans
+  const ph = byKey(prev.holidays, "id"), nh = byKey(next.holidays, "id");
+  Object.keys(nh).forEach(id => {
+    const h = nh[id], old = ph[id];
+    if (!old) { out.push('Created holiday plan "' + h.name + '"'); return; }
+    if (old.status !== h.status) out.push("Changed holiday plan \"" + h.name + "\" to " + h.status);
+    else if (!same([old.offs, old.hours, old.start, old.end, old.name], [h.offs, h.hours, h.start, h.end, h.name])) out.push('Edited holiday plan "' + h.name + '"');
+  });
+  Object.keys(ph).forEach(id => { if (!nh[id]) out.push('Deleted holiday plan "' + ph[id].name + '"'); });
+  // cover a lead added for a night
+  const kinds = { vip: "VIP late shift cover", phase1: "Phase 1 late shift cover", p1q: "Phase 1 queue cover" };
+  const pc = prev.lateCover || {}, nc = next.lateCover || {};
+  [...new Set([...Object.keys(pc), ...Object.keys(nc)])].sort().forEach(date => {
+    Object.keys(kinds).forEach(k => {
+      const a = (pc[date] || {})[k], b = (nc[date] || {})[k];
+      if (a === b) return;
+      if (!a) out.push("Added " + kinds[k] + " " + b + " for " + dayLabel(date));
+      else if (!b) out.push("Removed " + kinds[k] + " " + a + " for " + dayLabel(date));
+      else out.push("Changed " + kinds[k] + " for " + dayLabel(date) + " from " + a + " to " + b);
+    });
+  });
+  // a day edited by hand (Saturdays are rebuilt from the sheet, so a new Saturday entry is not an edit)
+  const pd = prev.days || {}, nd = next.days || {};
+  const isSat = key => /^\d{4}-\d{2}-\d{2}$/.test(key) && new Date(key + "T00:00:00Z").getUTCDay() === 6;
+  [...new Set([...Object.keys(pd), ...Object.keys(nd)])].sort().forEach(key => {
+    const a = pd[key], b = nd[key];
+    if (isSat(key)) {
+      if (a && b && !same([a.people, a.lineBars], [b.people, b.lineBars])) out.push("Edited the schedule for " + dayLabel(key));
+      return;
+    }
+    if (!a && b) out.push("Edited the schedule for " + dayLabel(key));
+    else if (a && !b) out.push("Reset the schedule for " + dayLabel(key) + " to the default");
+    else if (a && b && !same([a.people, a.lineBars], [b.people, b.lineBars])) out.push("Edited the schedule for " + dayLabel(key));
+  });
+  if (out.length > 15) return ["Large change (" + out.length + " items): probably an import or a restore"];
+  return out;
 }
 
 async function sessionEmail(request, env) {
@@ -287,7 +383,7 @@ export class PlanStore {
     return new Response("Method not allowed", { status: 405 });
   }
 }
-async function planStore(request, env, rest) {
+async function planStore(request, env, rest, actorEmail) {
   if (!env.PLAN) return new Response("Plan store is not configured.", { status: 500, headers: HEADERS });
   if (rest !== "plan") return new Response("Not found", { status: 404, headers: HEADERS });
   if (request.method !== "GET" && request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: HEADERS });
@@ -302,7 +398,21 @@ async function planStore(request, env, rest) {
     }
     init.body = text;
   }
-  const res = await env.PLAN.get(env.PLAN.idFromName("plan")).fetch("https://plan.internal/doc", init);
+  const stub = env.PLAN.get(env.PLAN.idFromName("plan"));
+  let before = null;
+  if (request.method === "POST") {
+    try {
+      const got = await stub.fetch("https://plan.internal/doc", { method: "GET" });
+      if (got.ok) before = JSON.parse(await got.text());
+    } catch (e) { before = null; }
+  }
+  const res = await stub.fetch("https://plan.internal/doc", init);
+  if (request.method === "POST" && res.ok) {
+    try {
+      const changes = planChanges(before && before.calendar, JSON.parse(init.body).calendar);
+      await logEvents(env, request, actorEmail, changes.map(detail => ({ event: "plan edit", detail })));
+    } catch (e) { /* the save already succeeded */ }
+  }
   const headers = new Headers(HEADERS);
   headers.set("Content-Type", "application/json");
   return new Response(res.body, { status: res.status, headers });
@@ -347,7 +457,7 @@ export default {
         if (env.ROLES) { try { list = JSON.parse((await env.ROLES.get("log")) || "[]") || []; } catch (e) { list = []; } }
         return json({ log: list.slice().reverse(), kept: LOG_KEEP });
       }
-      if (path.startsWith("/api/team/")) return planStore(request, env, path.slice("/api/team/".length));
+      if (path.startsWith("/api/team/")) return planStore(request, env, path.slice("/api/team/".length), email);
       return new Response("Not found", { status: 404, headers: HEADERS });
     }
     if (!email) return landing();

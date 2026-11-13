@@ -154,6 +154,60 @@ check("sign-out is logged", (await (await get("/api/log", boss.session)).json())
 
 check("an oversized plan write is refused", (await worker.fetch(new Request(ORIGIN + "/api/team/plan", { method: "POST", headers: { Cookie: bob.session, "Content-Type": "application/json" }, body: "x".repeat(2000001) }), env)).status === 413);
 
+// 5d. plan edits are logged with the person's name
+const person = (name, extra) => Object.assign({ name, roles: { vip: true }, start: 4, len: 18, brk: 12, split: null, queue: "vip", group: "VIP" }, extra || {});
+const baseCal = {
+  people: [person("Raza"), person("Ammana")], lineBars: [], leaves: [], holidays: [], lateCover: {}, days: {},
+  vipPlan: { blocks: [], readAt: "" }, sheetPlan: { line: [], hours: {}, readAt: "" }
+};
+const save = (cookie, cal, at) => putPlan(cookie, { version: 1, updatedAt: at, parts: 1, calendar: cal });
+const clone = o => JSON.parse(JSON.stringify(o));
+const planLog = async () => (await (await get("/api/log", boss.session)).json()).log.filter(e => e.event === "plan edit");
+let before = (await planLog()).length;
+await save(ann.session, baseCal, "2026-11-14T09:00:00.000Z");
+let edits = (await planLog()).slice(0, (await planLog()).length - before);
+
+before = (await planLog()).length;
+let next = clone(baseCal);
+next.people[0].start = 6;                                                     // changed hours
+next.people.push(person("Zed"));                                              // added to roster
+next.leaves.push({ id: "lv1", name: "Ammana", start: "2026-11-18", end: "2026-11-19", status: "pending" });
+next.lateCover["2026-11-30"] = { phase1: "Qasim" };                          // late cover
+next.days["2026-11-16"] = { people: [person("Raza")], lineBars: [], weekendCover: null }; // a weekday edited by hand
+next.holidays.push({ id: "h1", name: "Winter break", start: "2026-12-20", end: "2026-12-31", status: "draft", offs: {}, hours: {} });
+next.vipPlan = { blocks: [{ start: "2026-11-30", end: "2026-12-11", late: "Raza", phase1: "Ammana" }], readAt: "x" }; // from the sheet: must not be logged
+next.days["2026-11-14"] = { people: [person("Raza")], lineBars: [], weekendCover: { phase1: "Raza", vip: [] } };   // a Saturday built from the sheet: must not be logged
+await save(bob.session, next, "2026-11-14T09:05:00.000Z");
+let mine = (await planLog()).slice(before);
+const text = (await planLog()).slice(0, (await planLog()).length - before).map(e => e.detail).join(" | ");
+check("an hours change is logged", /Changed Raza's shift or break/.test(text));
+check("a roster addition is logged", /Added Zed to the roster/.test(text));
+check("a leave request is logged", /Requested leave for Ammana \(Wed 18 Nov to Thu 19 Nov\)/.test(text));
+check("late cover is logged with the date", /Added Phase 1 late shift cover Qasim for Mon 30 Nov/.test(text));
+check("a hand-edited weekday is logged", /Edited the schedule for Mon 16 Nov/.test(text));
+check("a holiday plan is logged", /Created holiday plan "Winter break"/.test(text));
+check("sheet data (VIP blocks) is not logged", !/vip|block/i.test(text.replace(/VIP late shift cover/g, "")));
+check("a Saturday built from the sheet is not logged", !/Sat 14 Nov/.test(text));
+const newest = (await planLog())[0];
+check("every edit carries the person's name and email", newest.name === "Bob" && newest.email === "bob@example.com");
+
+next = clone(next);
+next.leaves[0].status = "approved";
+next.lateCover = {};
+delete next.days["2026-11-16"];
+await save(ann.session, next, "2026-11-14T09:10:00.000Z");
+const text2 = (await planLog()).slice(0, 3).map(e => e.detail).join(" | ");
+if (process.env.SHOW) console.log("EDIT 1: " + text + String.fromCharCode(10) + "EDIT 2: " + text2);
+check("an approval is logged", /Approved leave for Ammana/.test(text2));
+check("removed cover and a reset day are logged", /Removed Phase 1 late shift cover Qasim for Mon 30 Nov/.test(text2) && /Reset the schedule for Mon 16 Nov to the default/.test(text2));
+const countBefore = (await planLog()).length;
+await save(ann.session, next, "2026-11-14T09:12:00.000Z");
+check("an unchanged save adds no entries", (await planLog()).length === countBefore);
+const big = clone(next); for (let i = 0; i < 20; i++) big.people.push(person("P" + i));
+await save(ann.session, big, "2026-11-14T09:13:00.000Z");
+check("a huge change collapses to one line", /Large change \(20 items\)/.test((await planLog())[0].detail));
+check("sign-ins carry the name too", (await (await get("/api/log", boss.session)).json()).log.some(e => e.event === "sign-in" && e.name === "Ann"));
+
 // 6. removing someone locks them out at once
 const saved = env.ALLOWED_EMAILS;
 env.ALLOWED_EMAILS = "ann@example.com";
