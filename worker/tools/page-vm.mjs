@@ -34,7 +34,7 @@ export function loadPage(nowMs) {
   const end = html.lastIndexOf("</script>");
   let js = html.slice(start, end);
   const at = js.lastIndexOf("})();");
-  const hook = "  globalThis.__page = { get data() { return data; }, set data(v) { data = v; }, ui, resolveDay, coveringFor, lateAlertHtml, coverageFor, followsRotation, ensureDay, markTouched, copyDayTo, anchorGaps, gapCover, queueFromRoles, rolesOf, defaultDayPeople, rotationBase, savedNightRows, editedBreakFixes, sanitizeData, nightAnchor, dateKey, parseKey };\n";
+  const hook = "  globalThis.__page = { get data() { return data; }, set data(v) { data = v; }, ui, resolveDay, coveringFor, lateAlertHtml, coverageFor, nightEdits, buildNight, legacyEdits, migrateSavedNights, commitWorking, ensureDay, copyDayTo, savedNightRows, personDiff, isLegacyDay, anchorGaps, gapCover, queueFromRoles, rolesOf, sanitizeData, nightAnchor, dateKey, parseKey, plainBars, persist };\n";
   js = js.slice(0, at) + hook + js.slice(at);
   const store = new Map();
   const localStorage = { getItem: k => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: k => store.delete(k) };

@@ -261,12 +261,13 @@ export async function fetchSheetRows(gid, fetchImpl, timeoutMs) {
   }
 }
 
-// The three tabs, each on its own: { weekends: [...] | null, blocks: [...] | null, rows: <Phase 1 / Support Line tab rows> | null }.
+// The three tabs, each on its own: { weekends: [...] | null, blocks: [...] | null, vipRows: <VIP Coverage Plan rows> | null, rows: <Phase 1 / Support Line tab rows> | null }.
 // A tab that cannot be read is null (the caller uses the stored copy). The third tab is returned as rows because reading it needs the roster.
 export async function readSheetsLive(fetchImpl, timeoutMs) {
   const one = async (gid, parse) => {
     try { return parse(await fetchSheetRows(gid, fetchImpl, timeoutMs)); } catch (e) { return null; }
   };
-  const [weekends, blocks, rows] = await Promise.all([one(WEEKEND_GID, parseWeekendRows), one(VIP_GID, parseVipRows), one(PLAN_GID, r => r)]);
-  return { weekends, blocks, rows };
+  const [weekends, vip, rows] = await Promise.all([one(WEEKEND_GID, parseWeekendRows), one(VIP_GID, r => ({ blocks: parseVipRows(r), rows: r })), one(PLAN_GID, r => r)]);
+  // the VIP Coverage Plan tab also carries people's original shifts at the top, which the page writes into the roster (`vipRows`)
+  return { weekends, blocks: vip ? vip.blocks : null, vipRows: vip ? vip.rows : null, rows };
 }

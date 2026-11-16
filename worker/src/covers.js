@@ -95,17 +95,20 @@ export function makeEngine(cal, live, nowMs) {
     p.brk = clamp(next, start, Math.max(start, start + len - BRK_LEN));
     if (p.split) p.split.at = clamp((p.split.at || start) + off, p.start + 1, p.start + p.len - 1);
   }
-  if (sheetTab) {
-    Object.keys(sheetTab.originals).forEach(name => {
+  // people's original shifts, from the top of the VIP Coverage Plan tab and of the Phase 1 / Support Line tab, go into the roster (the page does this on every read)
+  const vipTab = live.vipRows ? parseSheetTab(live.vipRows, roster, sheetOff) : null;
+  [vipTab, sheetTab].forEach(tab => {
+    if (!tab) return;
+    Object.keys(tab.originals).forEach(name => {
       const p = roster.find(x => x.name === name);
-      const o = sheetTab.originals[name];
+      const o = tab.originals[name];
       if (!p || p.split) return;
       const inside = p.brk >= o.start && p.brk <= o.start + o.len - BRK_LEN;
       const brk = o.brk != null ? o.brk : (inside ? p.brk : o.start + Math.max(0, Math.floor(o.len / 2) - 1));
       if (p.start === o.start && p.len === o.len && (o.brk == null || p.brk === brk)) return;
       applyHoursToPerson(p, o.start, o.len, brk);
     });
-  }
+  });
 
   // sheet data: the live read, or the stored copy (the page keeps the last Support Line rotation when the dates cannot be read)
   const storedSheet = stored("sheetPlan") || {};
@@ -163,11 +166,11 @@ export function makeEngine(cal, live, nowMs) {
     if (!h || (h.start === o.start && h.len === o.len)) { applyHoursToPerson(p, o.start, o.len, o.brk); p.split = o.split ? clone(o.split) : null; return; }
     takeHours(p, h);
   }
-  function applyChanges(people, key, baked) {
+  function applyChanges(people, key, only) {
     const orig = {};
     people.forEach(x => { orig[x.name] = { start: x.start, len: x.len, brk: x.brk, split: x.split ? clone(x.split) : null }; });
     changesFor(key).forEach(c => {
-      if (baked && baked.has(c.id)) return;
+      if (only && !only.has(c.id)) return;
       const find = n => people.find(x => x.name === n);
       if (c.type === "queue") {
         const p = find(c.name);
@@ -252,22 +255,97 @@ export function makeEngine(cal, live, nowMs) {
       }
     });
   }
-  // ---- Late shift and Phase 1 coverage on saved nights (the page's followsRotation / rotationBase / rotationNames / followRotation)
-  // A saved night keeps its other shifts as saved, but from next week on the sheet's Late Shift and Phase 1 coverage always apply to it,
-  // except for a person edited directly on that night (day.touched). This week is left as saved.
+  // ---- Saved nights (the page's firstFollowKey / personDiff / applyEdits / buildNight / nightEdits / legacyEdits / rotationNames)
+  // A saved weekday is { v: 2, ovr: { name: { start, len, brk, split, roles, c } }, lines } (only what a lead changed on it) or, from older versions, a whole
+  // snapshot ({ people, lineBars, baked, touched, rot }), which is read through legacyEdits. The night is built like any other night and the overrides
+  // are applied last, so everything a lead did not edit follows the sheet.
   const firstFollowKey = (() => { const a = nightAnchorKey(nowMs); const wd = weekdayOf(a); return addDaysK(a, 7 - (wd === 0 ? 6 : wd - 1)); })();
-  function followsRotation(key) {
-    const d = days[key];
-    return !!d && !d.weekendCover && !isSaturday(key) && !isSunday(key) && key >= firstFollowKey;
+  const isLegacyDay = (key, d) => !!d && Array.isArray(d.people) && !d.weekendCover && !isSaturday(key);
+  const barKey = b => b.owner + "|" + b.start + "|" + b.len;
+  function sameBars(a, b) {
+    const x = (a || []).map(barKey).sort(), y = (b || []).map(barKey).sort();
+    return x.length === y.length && x.every((v, i) => v === y[i]);
   }
-  function rotationBase(key) {
+  const plainBars = bars => (bars || []).map(b => ({ owner: b.owner, start: b.start, len: b.len }));
+  function personDiff(w, b, withLine) {
+    const o = {};
+    if (w.start !== b.start) o.start = w.start;
+    if (w.len !== b.len) o.len = w.len;
+    if (w.brk !== b.brk) o.brk = w.brk;
+    if (JSON.stringify(w.split || null) !== JSON.stringify(b.split || null)) o.split = w.split ? clone(w.split) : null;
+    const rw = rolesOf(w), rb = rolesOf(b);
+    if (["lead", "phase1", "vip"].concat(withLine ? ["line"] : []).some(k => !!rw[k] !== !!rb[k])) o.roles = { lead: !!rw.lead, phase1: !!rw.phase1, vip: !!rw.vip, line: withLine ? !!rw.line : !!rb.line };
+    return Object.keys(o).length ? o : null;
+  }
+  function applyEdits(people, ovr) {
+    Object.keys(ovr || {}).forEach(name => {
+      const p = people.find(x => x.name === name), o = ovr[name];
+      if (!p || !o) return;
+      if (Number.isFinite(o.start)) p.start = o.start;
+      if (Number.isFinite(o.len)) p.len = o.len;
+      if (Number.isFinite(o.brk)) p.brk = o.brk;
+      if ("split" in o) p.split = o.split ? clone(o.split) : null;
+      if (o.roles) p.roles = Object.assign({}, rolesOf(p), o.roles);
+    });
+  }
+  // Confirmed holiday plans set hours for people on nights.
+  function applyHolidayHours(people, key) {
+    holidays.forEach(h => {
+      if (h.status !== "confirmed") return;
+      const row = h.hours && h.hours[key];
+      if (!row) return;
+      Object.keys(row).forEach(name => {
+        const x = row[name], p = people.find(q => q.name === name);
+        if (p && x && Number.isFinite(x.start) && Number.isFinite(x.end)) applyHoursToPerson(p, x.start, x.end - x.start, clamp(p.brk, x.start, Math.max(x.start, x.end - 2)));
+      });
+    });
+  }
+  function buildNight(key, edits, opts) {
     const people = clone(roster);
-    applySheetPlan(people, [], key);
+    const lineBars = clone(cal.lineBars || []);
+    applySheetPlan(people, lineBars, key);
     const off = dstSlots(key);
-    if (off) people.forEach(p => shiftPersonClock(p, off));
+    if (off) {
+      people.forEach(p => shiftPersonClock(p, off));
+      lineBars.forEach(b => shiftBarClock(b, off));
+    }
     applyVipBlock(people, key);
     applyAnchorCover(people, key);
-    return people;
+    applyHolidayHours(people, key);
+    applyLateCover(people, key);
+    applyChanges(people, key, opts && opts.onlyChanges);
+    if (edits) {
+      applyEdits(people, edits.ovr);
+      if (edits.lines) lineBars.splice(0, lineBars.length, ...clone(edits.lines));
+    }
+    return { people, lineBars };
+  }
+  function nightEdits(key) {
+    const d = days[key];
+    if (!d || d.weekendCover || isSaturday(key) || isSunday(key)) return null;
+    return isLegacyDay(key, d) ? legacyEdits(key, d) : { ovr: d.ovr || {}, lines: d.lines || null };
+  }
+  function legacyEdits(key, d) {
+    const follow = key >= firstFollowKey;
+    const baked = new Set(d.baked || []);
+    const usual = buildNight(key, null, { onlyChanges: baked });
+    const touched = new Set(d.touched || []);
+    changesFor(key).forEach(c => { if (baked.has(c.id)) [c.name, c.from, c.a, c.b].forEach(n => { if (n) touched.add(n); }); });
+    const rot = follow ? rotationNames(key, d) : new Set();
+    const ovr = {};
+    d.people.forEach(p => {
+      const b = usual.people.find(x => x.name === p.name);
+      if (!b) return;
+      const diff = personDiff(p, b, false);
+      if (!diff) return;
+      if (!touched.has(p.name)) {
+        if (rot.has(p.name)) return;
+        if (Object.keys(diff).every(k => k === "brk")) return;
+      }
+      ovr[p.name] = diff;
+    });
+    const lines = !follow && Array.isArray(d.lineBars) && !sameBars(d.lineBars, usual.lineBars) ? plainBars(d.lineBars) : null;
+    return { ovr, lines };
   }
   function rotationNames(key, day) {
     const set = new Set();
@@ -287,41 +365,12 @@ export function makeEngine(cal, live, nowMs) {
     }
     return set;
   }
-  function touchedNames(key, day) {
-    const set = new Set(day.touched || []);
-    const baked = new Set(day.baked || []);
-    changesFor(key).forEach(c => { if (baked.has(c.id)) [c.name, c.from, c.a, c.b].forEach(n => { if (n) set.add(n); }); });
-    return set;
-  }
-  function followRotation(people, key, day) {
-    if (!followsRotation(key)) return;
-    const touched = touchedNames(key, day);
-    const fresh = rotationBase(key);
-    rotationNames(key, day).forEach(name => {
-      if (touched.has(name)) return;
-      const p = people.find(x => x.name === name), f = fresh.find(x => x.name === name);
-      if (!p || !f) return;
-      p.start = f.start; p.len = f.len; p.brk = f.brk; p.split = f.split ? clone(f.split) : null;
-      const rf = rolesOf(f);
-      p.roles = Object.assign({}, rolesOf(p), { phase1: rf.phase1, vip: rf.vip });
-    });
-  }
-  // the saved night's people with the sheet's rotation applied (no covers, no commands), or null when the night is not saved
-  function storedPeopleFor(key) {
-    const src = days[key];
-    if (!src || !Array.isArray(src.people)) return null;
-    const people = clone(src.people);
-    followRotation(people, key, src);
-    return people;
-  }
   // When the block's Late Shift or Phase 1 person normally works an anchor shift, that anchor is vacated for the block. The same happens for
   // one night when a lead puts someone who works an anchor shift on late-shift cover (kind "cover"): the anchor they leave needs a holder.
   function anchorGaps(key) {
-    if (isSunday(key) || isSaturday(key) || (days[key] && !followsRotation(key))) return [];
-    // on a saved night only the sheet's rotation is followed; covers and commands are already part of what was saved
-    const saved = !!days[key];
+    if (isSunday(key) || isSaturday(key)) return [];
     const blk = vipBlockFor(key);
-    const cov = saved ? null : lateCoverFor(key);
+    const cov = lateCoverFor(key);
     if (!blk && !cov) return [];
     const base = clone(roster);
     applySheetPlan(base, [], key);
@@ -336,7 +385,7 @@ export function makeEngine(cal, live, nowMs) {
     if (blk) [["late", blk.late], ["phase1", blk.phase1]].forEach(([kind, name]) => add(kind, name, blk.start));
     if (cov) [cov.vip, cov.phase1].forEach(name => add("cover", name, key, name + " is covering the late shift."));
     // someone a command moves off their own anchor shift leaves it open as well (a swap leaves nothing open)
-    if (!saved) changesFor(key).forEach(c => {
+    changesFor(key).forEach(c => {
       if (c.type === "shift") {
         const h = c.shift && changeHours(key, c.shift);
         const p = base.find(x => x.name === c.name);
@@ -447,24 +496,11 @@ export function makeEngine(cal, live, nowMs) {
   }
   // A weekday, as the page builds it (Saturdays have no covers; Sundays are closed).
   function resolveDay(key) {
-    const src = days[key];
-    const people = clone(src ? src.people : roster);
-    const lineBars = clone(src ? src.lineBars : (cal.lineBars || []));
-    if (!src) {
-      applySheetPlan(people, lineBars, key);
-      const off = dstSlots(key);
-      if (off) {
-        people.forEach(p => shiftPersonClock(p, off));
-        lineBars.forEach(b => shiftBarClock(b, off));
-      }
-      applyVipBlock(people, key);
-      applyAnchorCover(people, key);
-    } else followRotation(people, key, src);
-    applyLateCover(people, key);
-    applyChanges(people, key, new Set((src && src.baked) || []));
+    const edits = nightEdits(key);
+    const { people, lineBars } = buildNight(key, edits);
     const away = new Set(people.filter(p => isHolidayAway(p.name, key) || onLeave(p.name, key)).map(p => p.name));
-    if (!src) applyLineBackup(people, lineBars, away, key);
-    else markBackupBars(lineBars, away, key);
+    if (edits && edits.lines) markBackupBars(lineBars, away, key);
+    else applyLineBackup(people, lineBars, away, key);
     return { people, lineBars, away };
   }
 
@@ -569,8 +605,8 @@ export function makeEngine(cal, live, nowMs) {
     }
     // the two-week rotation: tagged "(Late Shift)" / "(Phase 1 Coverage)" on screen, not part of the covers list
     const rotation = [];
-    if ((!days[key] || followsRotation(key)) && blk.start) {
-      const tch = days[key] ? touchedNames(key, days[key]) : new Set();
+    if (blk.start) {
+      const tch = new Set(Object.keys((nightEdits(key) || { ovr: {} }).ovr));
       day.people.forEach(p => {
         if (day.away.has(p.name) || tch.has(p.name)) return;
         if (blk.late === p.name) rotation.push({ name: p.name, label: "Late Shift", lo: p.start, hi: p.start + p.len });
@@ -631,7 +667,7 @@ export function makeEngine(cal, live, nowMs) {
     });
     // Phase 1 queue cover: the sheet's Phase 1 person is off and no VIP rep was put on Phase 1 (not on days edited by hand)
     const blk = vipBlockFor(key);
-    if ((!days[key] || followsRotation(key)) && blk && blk.phase1 && day.away.has(blk.phase1) && !(lateCoverFor(key) || {}).p1q && !(days[key] && touchedNames(key, days[key]).has(blk.phase1))) {
+    if (blk && blk.phase1 && day.away.has(blk.phase1) && !(lateCoverFor(key) || {}).p1q && !(nightEdits(key) || { ovr: {} }).ovr[blk.phase1]) {
       out.push({ kind: "phase1", text: "Phase 1 needs cover. " + blk.phase1 + " is off. Add a VIP rep to Phase 1." });
     }
     const rot = lineRotationFor(key);
@@ -655,7 +691,7 @@ export function makeEngine(cal, live, nowMs) {
     return out;
   }
 
-  return { roster, storedPeopleFor, resolveDay, coveringFor, needsCover, vipBlockFor, awayMark, lateCoverFor, changesFor, anchorGaps, gapCover, anchorCoverFor, lateStartFor };
+  return { roster, nightEdits, resolveDay, coveringFor, needsCover, vipBlockFor, awayMark, lateCoverFor, changesFor, anchorGaps, gapCover, anchorCoverFor, lateStartFor };
 }
 
 // ---------------------------------------------------------------------------------------------------------------- the day for the API

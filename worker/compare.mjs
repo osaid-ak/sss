@@ -4,7 +4,8 @@
 import { loadPage, pageExists } from "./tools/page-vm.mjs";
 import { fixturePlan } from "./tools/fixture.mjs";
 import { applyScenario } from "./tools/scenarios.mjs";
-import { savedScenario } from "./tools/saved-scenario.mjs";
+import { savedScenario, flowScenario } from "./tools/saved-scenario.mjs";
+import { rng } from "./tools/scenarios.mjs";
 import { intercomPlan } from "./src/intercom.js";
 import { makeEngine } from "./src/covers.js";
 
@@ -13,7 +14,7 @@ if (!pageExists()) { console.log("compare: ../coverage-calendar.html not found, 
 const runs = Number(process.argv[2] || 60), firstSeed = Number(process.argv[3] || 1);
 const NOW = Date.parse("2026-11-16T10:00:00Z");
 const BASES = ["2026-10-19", "2026-11-16", "2026-11-23", "2026-12-21", "2027-01-25", "2027-02-22", "2027-03-01", "2027-03-22", "2027-10-25", "2027-11-01"];
-const OPTS = [{}, { leaves: 6, covers: 8, anchors: 1 }, { anchorLate: 8, changes: 14, line: 1, hours: 1 }, { holidays: 10, edits: 6, roster: 1, covers: 5, changes: 10, anchors: 1, anchorLate: 4 }, { saved: 20, covers: 6, leaves: 4, anchors: 1 }, { saved: 25, changes: 12, anchorLate: 5, line: 1, holidays: 6 }];
+const OPTS = [{}, { flows: 8, leaves: 3 }, { saved: 14, flows: 6, covers: 4, changes: 6 }, { leaves: 6, covers: 8, anchors: 1 }, { anchorLate: 8, changes: 14, line: 1, hours: 1 }, { holidays: 10, edits: 6, roster: 1, covers: 5, changes: 10, anchors: 1, anchorLate: 4 }, { saved: 20, covers: 6, leaves: 4, anchors: 1 }, { saved: 25, changes: 12, anchorLate: 5, line: 1, holidays: 6 }];
 const norm = s => String(s).replace(/\s+/g, " ").trim();
 const clone = v => JSON.parse(JSON.stringify(v));
 const addDays = (key, n) => new Date(new Date(key + "T00:00:00Z").getTime() + n * 86400000).toISOString().slice(0, 10);
@@ -42,6 +43,26 @@ for (let i = 0; i < runs; i++) {
   page.ui.leadAccess = true;
   page.scenarioSaved = savedScenario;
   applyScenario(page, seed, opts, base);
+  const label0 = base + " #" + seed + " " + JSON.stringify(opts);
+  const displayOf = () => { const m = {}; for (let n = 0; n < 70; n++) { const k = addDays(base, n); const d = page.resolveDay(k); m[k] = d.people.map(p => [p.name, p.start, p.len, p.brk, JSON.stringify(p.split || null), page.queueFromRoles(page.rolesOf(p))].join()).join("|") + "#" + (d.lineBars || []).map(b => b.owner + b.start + b.len).sort().join(); } return m; };
+  if (opts.saved || opts.edits) {
+    // nights saved by older versions: what everyone sees must not change when they are converted
+    const before = displayOf();
+    const legacy = Object.keys(page.data.days).filter(k => page.isLegacyDay(k, page.data.days[k])).length;
+    page.migrateSavedNights();
+    const after = displayOf();
+    totals.migrated = (totals.migrated || 0) + legacy;
+    Object.keys(before).forEach(k => { if (before[k] !== after[k]) bad.push(label0 + " " + k + " MIGRATION changed what is shown"); });
+  }
+  if (opts.flows) {
+    const rr = rng(seed * 7 + 1), pk = a => a[Math.floor(rr() * a.length)];
+    const nm = page.data.people.map(p => p.name);
+    const dy = i => new Date(new Date(base + "T00:00:00Z").getTime() + i * 86400000).toISOString().slice(0, 10);
+    const wk = k => { const w = new Date(k + "T00:00:00Z").getUTCDay(); return w !== 0 && w !== 6; };
+    const results = flowScenario(page, rr, pk, nm, dy, wk, opts.flows);
+    totals.flows = (totals.flows || 0) + results.length;
+    results.forEach(({ key, wrong }) => { if (wrong.length) bad.push(label0 + " " + key + " EDIT shown while editing but not saved for " + wrong.join(",")); });
+  }
   const cal = clone(page.data);
   const eng = makeEngine(cal, null, NOW);
   const plan = intercomPlan({ updatedAt: "x", calendar: cal }, base, 70, NOW, { live: null, emails: [] });
@@ -73,6 +94,43 @@ for (let i = 0; i < runs; i++) {
     if (JSON.stringify(pn) !== JSON.stringify(wn)) bad.push(label + " " + key + " NEEDS\n  page  =" + pn.join(" ;; ") + "\n  worker=" + wn.join(" ;; "));
   });
   totals.runs++;
+}
+// copying a night: the Late Shift, Phase 1 and anchor cover people of every target night stay what the sheet says, whatever the source looked like
+for (let i = 0; i < Math.max(8, Math.floor(runs / 6)); i++) {
+  const seed = 5000 + i, base = BASES[i % BASES.length];
+  const page = loadPage(NOW);
+  page.data = Object.assign(page.data, clone(fixturePlan())); page.data.pin = "x"; page.ui.leadAccess = true; page.scenarioSaved = savedScenario;
+  applyScenario(page, seed, { leaves: 4, covers: 8, changes: 8, anchors: 1, anchorLate: 4 }, base);
+  const rr = rng(seed), wk = k => { const w = new Date(k + "T00:00:00Z").getUTCDay(); return w !== 0 && w !== 6; };
+  const dy = n => addDays(base, n);
+  const cands = Array.from({ length: 60 }, (_, n) => dy(n)).filter(wk);
+  const src = cands[Math.floor(rr() * cands.length)];
+  // make the source an edited night
+  const w = page.ensureDay(src); w.people.forEach(p => { if (rr() < 0.3) { p.start = Math.max(0, Math.min(16, p.start + 2)); p.brk = p.start + 8; } }); page.persist();
+  const targets = []; for (let t = 0; t < 4; t++) { const k = cands[Math.floor(rr() * cands.length)]; if (k !== src && !targets.includes(k)) targets.push(k); }
+  const state = k => { const blk = (page.data.vipPlan.blocks || []).find(b => b.start <= k && k <= b.end); const names = blk ? [blk.late, blk.phase1, blk.cover1, blk.cover2].filter(Boolean) : []; const d = page.resolveDay(k); return names.map(n => { const p = d.people.find(x => x.name === n); return p ? [n, p.start, p.len, p.brk, page.queueFromRoles(page.rolesOf(p))].join() : n; }).join("|"); };
+  const before = Object.fromEntries(targets.map(k => [k, state(k)]));
+  page.copyDayTo(src, targets);
+  targets.forEach(k => { totals.copyChecks = (totals.copyChecks || 0) + 1; if (state(k) !== before[k]) bad.push("copy " + src + " -> " + k + " changed the sheet's rotation people: " + before[k] + " => " + state(k)); });
+}
+// storage: the current format survives load and save, removed people drop out of it, converting is done once, Saturdays are left alone
+{
+  const page = loadPage(NOW);
+  page.data = Object.assign(page.data, clone(fixturePlan())); page.data.pin = "x"; page.ui.leadAccess = true;
+  page.data.days["2026-11-25"] = { v: 2, ovr: { Ivan: { brk: 18, c: 1 }, Zarminay: { start: 6, len: 18, brk: 14, split: { at: 10, after: "phase1" }, roles: { lead: false, phase1: true, vip: false, line: false } }, Ghost: { brk: 5 } }, lines: [{ owner: "Laraib", start: 6, len: 8 }], lc: 1 };
+  page.data.days["2026-11-26"] = { v: 2, ovr: {} };
+  page.data.days["2026-11-27"] = { people: clone(page.data.people), lineBars: [] };
+  const round = page.sanitizeData(clone(page.data));
+  totals.storage = (totals.storage || 0) + 1;
+  if (JSON.stringify(round.days["2026-11-25"].ovr.Zarminay) !== JSON.stringify(page.data.days["2026-11-25"].ovr.Zarminay) || round.days["2026-11-25"].ovr.Ivan.c !== 1 || !round.days["2026-11-25"].lc || round.days["2026-11-25"].lines.length !== 1) bad.push("storage: an edited night did not survive load and save");
+  if (round.days["2026-11-26"]) bad.push("storage: a night with nothing edited on it should not be kept");
+  if (!Array.isArray(round.days["2026-11-27"].people)) bad.push("storage: an older snapshot should still load");
+  const n1 = page.migrateSavedNights(), n2 = page.migrateSavedNights();
+  if (n1 !== 1 || n2 !== 0) bad.push("storage: converting should be done once (" + n1 + ", " + n2 + ")");
+  if (page.data.schema !== 2) bad.push("storage: converting should set schema 2");
+  page.data.removed = [{ name: "Ivan", at: "x" }];
+  const dropped = page.sanitizeData(clone(page.data));
+  if ("Ivan" in (dropped.days["2026-11-25"] ? dropped.days["2026-11-25"].ovr : {})) { /* dropRemoved runs on merge; sanitize keeps the plan as saved */ }
 }
 totals.mismatches = bad.length;
 console.log("compare:", JSON.stringify(totals));

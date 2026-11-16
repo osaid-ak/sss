@@ -235,15 +235,21 @@ function planChanges(prev, next, limit) {
   // a day edited by hand (Saturdays are rebuilt from the sheet, so a new Saturday entry is not an edit)
   const pd = prev.days || {}, nd = next.days || {};
   const isSat = key => /^\d{4}-\d{2}-\d{2}$/.test(key) && new Date(key + "T00:00:00Z").getUTCDay() === 6;
+  // Saved weekdays are stored as what was edited on them (ovr, lines) or, by older versions, as whole snapshots (people, lineBars). The first save of
+  // the new format converts every saved night at once: that is one line, not an edit per night.
+  const upgraded = next.schema === 2 && prev.schema !== 2;
+  if (upgraded) out.push("Saved nights upgraded: each now keeps only what was edited on it, everything else follows the sheet");
+  const shape = d => [d.people, d.lineBars, d.ovr, d.lines];
   [...new Set([...Object.keys(pd), ...Object.keys(nd)])].sort().forEach(key => {
     const a = pd[key], b = nd[key];
     if (isSat(key)) {
       if (a && b && !same([a.people, a.lineBars], [b.people, b.lineBars])) out.push("Edited the schedule for " + dayLabel(key));
       return;
     }
+    if (upgraded) return;
     if (!a && b) out.push("Edited the schedule for " + dayLabel(key));
     else if (a && !b) out.push("Reset the schedule for " + dayLabel(key) + " to the default");
-    else if (a && b && !same([a.people, a.lineBars], [b.people, b.lineBars])) out.push("Edited the schedule for " + dayLabel(key));
+    else if (a && b && !same(shape(a), shape(b))) out.push("Edited the schedule for " + dayLabel(key));
   });
   // changes made by a command, per night
   const pg = prev.changes || {}, ng = next.changes || {};

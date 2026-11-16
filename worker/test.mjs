@@ -366,7 +366,7 @@ check("late shift cover: who, what and the exact times (PKT, and as UTC instants
 check("Phase 1 queue cover names the rotation person it replaces", texts("2026-11-17").includes("Ayeshah is covering Jawad on Phase 1."));
 check("Support Line: the sheet's backup takes the slot of an owner who is off, and says how the shift moved", texts("2026-11-18").includes("Ivan is covering Laraib on Support Line 6pm–10pm. Ivan's shift was adjusted to 6pm–3am to cover the Support Line."));
 check("needs cover: a late shift without a Phase 1 person, an uncovered anchor, and a Support Line slot nobody can take", cv("2026-11-19").needsCover.some(n => n.kind === "late" && /needs a Phase 1 person/.test(n.text)) && cv("2026-11-19").needsCover.some(n => n.kind === "anchor" && /Anchor 2 on the VIP Coverage Plan sheet/.test(n.text)) && cv("2026-11-19").needsCover.some(n => n.kind === "line" && n.text === "Support Line 10pm–1am owner Qasim is off. Backup Ivan is off too."));
-check("the rotation people are named (Late Shift person); a saved night this week is left as saved (no anchor cover) while a saved night from next week follows the sheet", cv("2026-11-16").lateShift === "Raza" && !cv("2026-11-20").covers.some(c => c.kind === "anchor") && cv("2026-11-24").covers.some(c => c.kind === "anchor" && c.name === "Zarminay"));
+check("the rotation people are named (Late Shift person); saved nights follow the sheet too, so the anchor cover shows on them", cv("2026-11-16").lateShift === "Raza" && cv("2026-11-20").covers.some(c => c.kind === "anchor") && cv("2026-11-24").covers.some(c => c.kind === "anchor" && c.name === "Zarminay"));
 
 // saved nights: from next week on the sheet's Late Shift and Phase 1 coverage apply to them, except to people edited directly; this week is left as saved
 const savedPeople = (rotName, extra) => coverCal.people.map(p => { const q = JSON.parse(JSON.stringify(p)); if (q.name === rotName) { q.roles = { phase1: true }; q.queue = "phase1"; } return q; });
@@ -380,6 +380,17 @@ check("saved night next week: the sheet's Phase 1 person is on Phase 1 and the o
 check("saved night next week: a person edited directly (touched) stays as edited while the sheet's Phase 1 person still follows", queuesOn(staleNextEdited, "2026-11-25").Ivan === "phase1" && queuesOn(staleNextEdited, "2026-11-25").Jawad === "phase1");
 check("saved night this week is left exactly as saved", queuesOn(staleThisWeek, "2026-11-19").Ivan === "phase1" && queuesOn(staleThisWeek, "2026-11-19").Jawad === "vip");
 check("a night saved before the rotation was recorded: whoever sits on Phase 1 against their roster queue is taken to be the old rotation", queuesOn(legacyNext, "2026-11-25").Ivan === "vip" && queuesOn(legacyNext, "2026-11-25").Jawad === "phase1");
+// the original shifts at the top of the VIP Coverage Plan tab go into the roster, as the page does (Ivan's 11pm break on the sheet, 12am in the stale roster)
+const vipRowsLive = { vipRows: [[], ["", "", "", "Ammana", "Ivan"], ["", "", "", "7PM - 4AM", "7PM - 4AM"], ["", "", "", "7PM - 4AM", "7PM - 4AM"], ["", "", "", "11 - 12", "11 - 12"]] };
+const staleIvan = JSON.parse(JSON.stringify(coverCal)); staleIvan.people.find(p => p.name === "Ivan").brk = 16;
+const ivanOn = (live) => makeEngine(staleIvan, live, Date.parse("2026-11-16T10:00:00Z")).resolveDay("2026-11-24").people.find(p => p.name === "Ivan");
+check("VIP Coverage Plan tab originals reach the roster: Ivan's break is the sheet's 11pm, not the stale 12am", ivanOn(vipRowsLive).brk === 16 && ivanOn(null).brk === 18);
+// a night keeps only what was edited: the rest follows the sheet, and removing a late cover puts the person back (no stale late hours)
+const editedCal = (cover) => Object.assign({}, JSON.parse(JSON.stringify(coverCal)), { lateCover: cover, days: { "2026-11-25": { v: 2, ovr: { Zarminay: { brk: 22 } } } } });
+const zOn = cal => makeEngine(cal, null, Date.parse("2026-11-16T10:00:00Z")).resolveDay("2026-11-25").people.find(p => p.name === "Zarminay");
+const zCovered = zOn(editedCal({ "2026-11-25": { vip: "Zarminay" } })), zFree = zOn(editedCal({}));
+check("an edited night: the edited break stays, and with the late cover removed the person is back on their own hours", zCovered.start === 15 && zCovered.brk === 22 && zFree.start === 6 && zFree.brk === 22);
+check("a night with nothing edited on it is the night as the sheet gives it", JSON.stringify(makeEngine(Object.assign({}, coverCal, { days: { "2026-11-25": { v: 2, ovr: {} } } }), null, Date.parse("2026-11-16T10:00:00Z")).resolveDay("2026-11-25").people) === JSON.stringify(makeEngine(coverCal, null, Date.parse("2026-11-16T10:00:00Z")).resolveDay("2026-11-25").people));
 // nobody on the Support Line for a stretch is a need for a lead
 const lineCal = { people: [CP("Solo", { roles: { vip: true, line: true } })], vipPlan: { blocks: [], readAt: "x" }, leaves: [], holidays: [], lateCover: {}, days: {}, changes: {}, lineBars: [{ owner: "Solo", start: 6, len: 8 }], sheetPlan: { hours: {}, line: [], readAt: "x" } };
 const lineDay = intercomPlan({ updatedAt: "x", calendar: lineCal }, "2026-11-17", 1, Date.parse("2026-11-16T10:00:00Z"), { live: null, emails: [] }).days[0];
@@ -394,7 +405,7 @@ satLeave.leaves.push({ id: "l9", name: "Raza", start: "2026-11-21", end: "2026-1
 check("Saturday: a weekend cover person on leave shows as away", intercomPlan({ updatedAt: "x", calendar: satLeave }, "2026-11-21", 1, Date.parse("2026-11-16T10:00:00Z"), { live: null, emails: [] }).days[0].away.map(a => a.name).join() === "Raza");
 // odd data in the cover logic must never take the queue decisions down with it
 const oddCal = JSON.parse(JSON.stringify(coverCal));
-oddCal.days["2026-11-19"] = { people: "not a list", lineBars: [] };
+oddCal.days["2026-11-19"] = { v: 2, ovr: {}, lines: 5 };
 const odd = intercomPlan({ updatedAt: "x", calendar: oddCal }, "2026-11-18", 3, Date.parse("2026-11-16T10:00:00Z"), { live: null, emails: [] });
 check("a day the cover logic cannot read says so (coversError) and its queue answer is still there; the other days are unaffected", odd.days[1].coversError && odd.days[1].covers.length === 0 && Array.isArray(odd.days[1].decisions) && odd.days[1].queues && !odd.days[0].coversError && !odd.days[2].coversError);
 // clocks change: on the summer schedule (March) the same stored shifts sit one hour earlier

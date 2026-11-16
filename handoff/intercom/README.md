@@ -243,7 +243,7 @@ Rollback: set `"mode": "off"` and redeploy the config. Or revoke the key (sectio
 
 ## 5. Things you need to know
 
-- **A hand-edited day is frozen in the calendar.** If a lead edits a weekday it keeps that day's roles. If the sheet later swaps the Phase 1 person for that block, the calendar's decisions for that day will show the *edited* day (e.g. "Zarminay -> VIP") and Intercom follows the calendar. "Reset this day to default" in the calendar makes the day follow the sheet again. This is how the calendar already behaves on screen.
+- **An edited night keeps only what was edited.** If a lead edits a person on a weekday (hours, break or queue), that person keeps the edit on that night and everyone else follows the sheet, including a later change of the block's Phase 1 person. The calendar's decisions for that night show the edited person's queue with the reason `day edited by a lead`, and Intercom follows the calendar. "Reset this day to default" (or Edited nights in the calendar) makes the night follow the sheet again. This is how the calendar behaves on screen.
 - **Late shift** is time of day, not a team: it moves nobody. **Anchor cover** is sheet-driven and VIP-only: not a decision. **Leave / PTO** are not used: if the Phase 1 rep is off, a lead adds a VIP rep as "Phase 1 queue cover" in the calendar and that arrives as a decision.
 - **Saturday** names come from the Weekend Cover (Actual, then Swap, then Planned), read live by the calendar. If Google cannot be read, its stored copy is used and `sources` says so.
 - **New roster people** with an ambiguous name need an email written on their roster entry in the calendar, or they are skipped (and reported) until they have one. (There is no field for it in the calendar yet; ask for it.)

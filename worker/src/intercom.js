@@ -76,7 +76,7 @@ export function emailFor(person, emails) {
 // One shift day: kind, what the calendar thinks the rotation is, the decisions (people whose queue differs from normal) and `queues`
 // (everyone's queue that day; null on a Sunday, which is closed).
 // `live` = { weekends: Map date -> { phase1, vip[] } | null, blocks: [...] | null } from the sheet (null: use the stored copy); `emails` = allowed emails.
-export function dayPlan(cal, key, live, emails, anchorCovers, storedPeople) {
+export function dayPlan(cal, key, live, emails, anchorCovers, edits) {
   live = live || {};
   const dow = weekdayOf(key);
   const out = { date: key, weekday: WEEKDAYS[dow], kind: dow === 0 ? "sunday" : dow === 6 ? "saturday" : "weekday", rotationPhase1: null, edited: false, decisions: [], queues: {} };
@@ -92,6 +92,7 @@ export function dayPlan(cal, key, live, emails, anchorCovers, storedPeople) {
   // what each person's queue would be with nobody having decided anything
   const normal = name => (out.kind === "weekday" && rotation && name === rotation ? "phase1" : rosterQ.get(name));
   const stored = (cal.days && cal.days[key]) || null;
+  const hasEdits = !!edits && Object.keys(edits.ovr).length > 0;
   const decided = new Map(); // name -> { queue, reason }
   const set = (name, queue, reason) => { if (name) decided.set(name, { queue, reason }); };
 
@@ -102,14 +103,9 @@ export function dayPlan(cal, key, live, emails, anchorCovers, storedPeople) {
       (wc.vip || []).forEach(n => set(matchName(n, roster), "vip", "weekend cover"));
     }
   } else {
-    if (stored && Array.isArray(stored.people)) {
-      out.edited = true;
-      // a saved night keeps its shifts as saved, but from next week on the sheet's Late Shift and Phase 1 coverage apply to it (`storedPeople`)
-      (storedPeople || stored.people).forEach(p => set(p.name, personQueue(p), "day edited by a lead"));
-    } else {
-      // whoever holds a vacated anchor shift works it in VIP (the page does this before the covers and changes below)
-      (anchorCovers || []).forEach(n => set(n, "vip", "anchor shift cover"));
-    }
+    out.edited = hasEdits || !!(edits && edits.lines);
+    // whoever holds a vacated anchor shift works it in VIP (the page does this before the covers and changes below)
+    (anchorCovers || []).forEach(n => set(n, "vip", "anchor shift cover"));
     const cov = (cal.lateCover && cal.lateCover[key]) || null;
     if (cov) {
       // the page applies the Phase 1 queue cover first, then the late-shift covers on top
@@ -117,12 +113,10 @@ export function dayPlan(cal, key, live, emails, anchorCovers, storedPeople) {
       set(cov.vip, "vip", "VIP late shift cover");
       set(cov.phase1, "phase1", "Phase 1 late shift cover");
     }
-    // changes made by a command (the page applies them last, on top of everything above), except those a hand-edited night already has built in
-    const baked = new Set((stored && stored.baked) || []);
+    // changes made by a command (the page applies them after the covers)
     const now = n => (decided.get(n) ? decided.get(n).queue : normal(n));
     const usable = q => q === "phase1" || q === "vip" || q === "both" || q === "lead";
     ((cal.changes && Array.isArray(cal.changes[key]) ? cal.changes[key] : [])).forEach(c => {
-      if (baked.has(c.id)) return;
       if (c.type === "queue") set(c.name, c.queue, "calendar command");
       else if (c.type === "takeover") { const q = c.shift && c.shift.kind === "anchor" ? "vip" : now(c.from); if (usable(q)) set(c.name, q, "calendar command"); }
       else if (c.type === "swap") {
@@ -130,6 +124,11 @@ export function dayPlan(cal, key, live, emails, anchorCovers, storedPeople) {
         if (usable(qb)) set(c.a, qb, "calendar command");
         if (usable(qa)) set(c.b, qa, "calendar command");
       }
+    });
+    // what a lead edited on the night comes last (the page applies the overrides after the covers and the commands)
+    if (edits) Object.keys(edits.ovr).forEach(name => {
+      const o = edits.ovr[name], r = roster.find(x => x.name === name);
+      if (o && o.roles && r) set(name, queueOfRoles(Object.assign({}, r.roles || {}, o.roles)), "day edited by a lead");
     });
   }
   roster.forEach(p => {
@@ -166,9 +165,9 @@ export function intercomPlan(doc, fromKey, days, nowMs, ctx) {
     const key = addDaysKey(fromKey, i);
     let anchorNames = [];
     try { if (engine) anchorNames = engine.anchorGaps(key).map(g => engine.gapCover(key, g)).filter(Boolean); } catch (e) { anchorNames = []; }
-    let storedPeople = null;
-    try { storedPeople = engine ? engine.storedPeopleFor(key) : null; } catch (e) { storedPeople = null; }
-    const day = dayPlan(cal, key, liveFor, emails, anchorNames, storedPeople);
+    let edits = null;
+    try { edits = engine ? engine.nightEdits(key) : null; } catch (e) { edits = null; }
+    const day = dayPlan(cal, key, liveFor, emails, anchorNames, edits);
     try {
       if (!engine) throw new Error(engineError);
       let weekendNames = [];
