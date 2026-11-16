@@ -18,6 +18,8 @@ const VIP_LATE_LEN = 18;
 // the break on the late shift is always 2am PKT on the standard clock (1am in summer): seven half-hours after it starts
 const LATE_BRK_REL = 7;
 const BRK_LEN = 2;
+const LINE_START = 4;
+const LINE_END = 24;
 // The three Support Line slots on the summer schedule: 5-9pm, 9pm-12am, 12-3am PKT (6-10, 10-1, 1-4 in standard time).
 const LINE_SLOTS = [{ start: 4, len: 8 }, { start: 12, len: 6 }, { start: 18, len: 6 }];
 // The three anchor shifts (Osaid, Raza, Jawad) as summer-schedule slots: 5PM-2AM, 6PM-3AM, 8PM-5AM on the sheet's standard-time clock.
@@ -586,6 +588,26 @@ export function makeEngine(cal, live, nowMs) {
     return { covers: out, rotation };
   }
 
+  // Stretches of the Support Line window where nobody is on the line (the page's lineZeroRuns, from assignmentAt).
+  function lineZeroRuns(day, key) {
+    const off = dstSlots(key), lo = LINE_START + off, hi = LINE_END + off;
+    const line = new Array(SLOTS).fill(0);
+    day.people.forEach(p => {
+      if (day.away.has(p.name)) return;
+      for (let s = p.start; s < p.start + p.len; s++) {
+        if (s >= p.brk && s < p.brk + BRK_LEN) continue;
+        if (day.lineBars.some(b => b.owner === p.name && s >= b.start && s < b.start + b.len)) line[s]++;
+      }
+    });
+    const runs = [];
+    let from = -1;
+    for (let x = lo; x <= hi; x++) {
+      const zero = x < hi && !line[x];
+      if (zero && from < 0) from = x;
+      if (!zero && from >= 0) { runs.push({ start: from, end: x }); from = -1; }
+    }
+    return runs;
+  }
   // What still needs a lead (the page's red alerts): a late shift without a VIP or Phase 1 person, an uncovered anchor,
   // a Phase 1 person who is off with no queue cover, a Support Line slot whose owner is off with nobody covering.
   function needsCover(key, day) {
@@ -628,6 +650,8 @@ export function makeEngine(cal, live, nowMs) {
         out.push({ kind: "line", text: "Support Line " + name + " owner " + owner + " is off. " + why });
       });
     }
+    // nobody on the Support Line for a stretch: a lead has to adjust a break or add cover
+    lineZeroRuns(day, key).forEach(r => out.push({ kind: "line", text: "Support Line has nobody " + slotLabel(r.start) + "–" + slotLabel(r.end) + ". Adjust breaks or add cover." }));
     return out;
   }
 
