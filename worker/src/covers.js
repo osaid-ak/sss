@@ -25,6 +25,7 @@ const ANCHORS = [{ start: 2, len: 18 }, { start: 4, len: 18 }, { start: 8, len: 
 const KEY = /^\d{4}-\d{2}-\d{2}$/;
 
 const clone = v => JSON.parse(JSON.stringify(v));
+const addDaysK = (key, n) => { const [y, m, d] = key.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const pad = n => String(n).padStart(2, "0");
 function slotLabel(s) {
@@ -249,12 +250,76 @@ export function makeEngine(cal, live, nowMs) {
       }
     });
   }
+  // ---- Late shift and Phase 1 coverage on saved nights (the page's followsRotation / rotationBase / rotationNames / followRotation)
+  // A saved night keeps its other shifts as saved, but from next week on the sheet's Late Shift and Phase 1 coverage always apply to it,
+  // except for a person edited directly on that night (day.touched). This week is left as saved.
+  const firstFollowKey = (() => { const a = nightAnchorKey(nowMs); const wd = weekdayOf(a); return addDaysK(a, 7 - (wd === 0 ? 6 : wd - 1)); })();
+  function followsRotation(key) {
+    const d = days[key];
+    return !!d && !d.weekendCover && !isSaturday(key) && !isSunday(key) && key >= firstFollowKey;
+  }
+  function rotationBase(key) {
+    const people = clone(roster);
+    applySheetPlan(people, [], key);
+    const off = dstSlots(key);
+    if (off) people.forEach(p => shiftPersonClock(p, off));
+    applyVipBlock(people, key);
+    applyAnchorCover(people, key);
+    return people;
+  }
+  function rotationNames(key, day) {
+    const set = new Set();
+    const blk = vipBlockFor(key);
+    if (blk) [blk.late, blk.phase1, blk.cover1, blk.cover2].forEach(n => { if (n) set.add(n); });
+    if (Array.isArray(day.rot)) day.rot.forEach(n => set.add(n));
+    else if (Array.isArray(day.people)) {
+      const off = dstSlots(key), lateAt = lateStartFor(key);
+      day.people.forEach(p => {
+        const r = roster.find(x => x.name === p.name);
+        if (!r) return;
+        const lateHours = p.len === VIP_LATE_LEN && p.start === lateAt;
+        const phase1 = queueFromRoles(rolesOf(p)) === "phase1" && queueFromRoles(rolesOf(r)) !== "phase1";
+        const anchor = ANCHORS.some(a => p.start === a.start + off && p.len === a.len) && !(p.start === r.start + off && p.len === r.len);
+        if (lateHours || phase1 || anchor) set.add(p.name);
+      });
+    }
+    return set;
+  }
+  function touchedNames(key, day) {
+    const set = new Set(day.touched || []);
+    const baked = new Set(day.baked || []);
+    changesFor(key).forEach(c => { if (baked.has(c.id)) [c.name, c.from, c.a, c.b].forEach(n => { if (n) set.add(n); }); });
+    return set;
+  }
+  function followRotation(people, key, day) {
+    if (!followsRotation(key)) return;
+    const touched = touchedNames(key, day);
+    const fresh = rotationBase(key);
+    rotationNames(key, day).forEach(name => {
+      if (touched.has(name)) return;
+      const p = people.find(x => x.name === name), f = fresh.find(x => x.name === name);
+      if (!p || !f) return;
+      p.start = f.start; p.len = f.len; p.brk = f.brk; p.split = f.split ? clone(f.split) : null;
+      const rf = rolesOf(f);
+      p.roles = Object.assign({}, rolesOf(p), { phase1: rf.phase1, vip: rf.vip });
+    });
+  }
+  // the saved night's people with the sheet's rotation applied (no covers, no commands), or null when the night is not saved
+  function storedPeopleFor(key) {
+    const src = days[key];
+    if (!src || !Array.isArray(src.people)) return null;
+    const people = clone(src.people);
+    followRotation(people, key, src);
+    return people;
+  }
   // When the block's Late Shift or Phase 1 person normally works an anchor shift, that anchor is vacated for the block. The same happens for
   // one night when a lead puts someone who works an anchor shift on late-shift cover (kind "cover"): the anchor they leave needs a holder.
   function anchorGaps(key) {
-    if (isSunday(key) || isSaturday(key) || days[key]) return [];
+    if (isSunday(key) || isSaturday(key) || (days[key] && !followsRotation(key))) return [];
+    // on a saved night only the sheet's rotation is followed; covers and commands are already part of what was saved
+    const saved = !!days[key];
     const blk = vipBlockFor(key);
-    const cov = lateCoverFor(key);
+    const cov = saved ? null : lateCoverFor(key);
     if (!blk && !cov) return [];
     const base = clone(roster);
     applySheetPlan(base, [], key);
@@ -269,7 +334,7 @@ export function makeEngine(cal, live, nowMs) {
     if (blk) [["late", blk.late], ["phase1", blk.phase1]].forEach(([kind, name]) => add(kind, name, blk.start));
     if (cov) [cov.vip, cov.phase1].forEach(name => add("cover", name, key, name + " is covering the late shift."));
     // someone a command moves off their own anchor shift leaves it open as well (a swap leaves nothing open)
-    changesFor(key).forEach(c => {
+    if (!saved) changesFor(key).forEach(c => {
       if (c.type === "shift") {
         const h = c.shift && changeHours(key, c.shift);
         const p = base.find(x => x.name === c.name);
@@ -392,7 +457,7 @@ export function makeEngine(cal, live, nowMs) {
       }
       applyVipBlock(people, key);
       applyAnchorCover(people, key);
-    }
+    } else followRotation(people, key, src);
     applyLateCover(people, key);
     applyChanges(people, key, new Set((src && src.baked) || []));
     const away = new Set(people.filter(p => isHolidayAway(p.name, key) || onLeave(p.name, key)).map(p => p.name));
@@ -502,9 +567,10 @@ export function makeEngine(cal, live, nowMs) {
     }
     // the two-week rotation: tagged "(Late Shift)" / "(Phase 1 Coverage)" on screen, not part of the covers list
     const rotation = [];
-    if (!days[key] && blk.start) {
+    if ((!days[key] || followsRotation(key)) && blk.start) {
+      const tch = days[key] ? touchedNames(key, days[key]) : new Set();
       day.people.forEach(p => {
-        if (day.away.has(p.name)) return;
+        if (day.away.has(p.name) || tch.has(p.name)) return;
         if (blk.late === p.name) rotation.push({ name: p.name, label: "Late Shift", lo: p.start, hi: p.start + p.len });
         else if (blk.phase1 === p.name) rotation.push({ name: p.name, label: "Phase 1 Coverage", lo: p.start, hi: p.start + p.len });
       });
@@ -543,7 +609,7 @@ export function makeEngine(cal, live, nowMs) {
     });
     // Phase 1 queue cover: the sheet's Phase 1 person is off and no VIP rep was put on Phase 1 (not on days edited by hand)
     const blk = vipBlockFor(key);
-    if (!days[key] && blk && blk.phase1 && day.away.has(blk.phase1) && !(lateCoverFor(key) || {}).p1q) {
+    if ((!days[key] || followsRotation(key)) && blk && blk.phase1 && day.away.has(blk.phase1) && !(lateCoverFor(key) || {}).p1q && !(days[key] && touchedNames(key, days[key]).has(blk.phase1))) {
       out.push({ kind: "phase1", text: "Phase 1 needs cover. " + blk.phase1 + " is off. Add a VIP rep to Phase 1." });
     }
     const rot = lineRotationFor(key);
@@ -565,7 +631,7 @@ export function makeEngine(cal, live, nowMs) {
     return out;
   }
 
-  return { roster, resolveDay, coveringFor, needsCover, vipBlockFor, awayMark, lateCoverFor, changesFor, anchorGaps, gapCover, anchorCoverFor, lateStartFor };
+  return { roster, storedPeopleFor, resolveDay, coveringFor, needsCover, vipBlockFor, awayMark, lateCoverFor, changesFor, anchorGaps, gapCover, anchorCoverFor, lateStartFor };
 }
 
 // ---------------------------------------------------------------------------------------------------------------- the day for the API

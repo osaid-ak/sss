@@ -76,7 +76,7 @@ export function emailFor(person, emails) {
 // One shift day: kind, what the calendar thinks the rotation is, the decisions (people whose queue differs from normal) and `queues`
 // (everyone's queue that day; null on a Sunday, which is closed).
 // `live` = { weekends: Map date -> { phase1, vip[] } | null, blocks: [...] | null } from the sheet (null: use the stored copy); `emails` = allowed emails.
-export function dayPlan(cal, key, live, emails, anchorCovers) {
+export function dayPlan(cal, key, live, emails, anchorCovers, storedPeople) {
   live = live || {};
   const dow = weekdayOf(key);
   const out = { date: key, weekday: WEEKDAYS[dow], kind: dow === 0 ? "sunday" : dow === 6 ? "saturday" : "weekday", rotationPhase1: null, edited: false, decisions: [], queues: {} };
@@ -104,7 +104,8 @@ export function dayPlan(cal, key, live, emails, anchorCovers) {
   } else {
     if (stored && Array.isArray(stored.people)) {
       out.edited = true;
-      stored.people.forEach(p => set(p.name, personQueue(p), "day edited by a lead"));
+      // a saved night keeps its shifts as saved, but from next week on the sheet's Late Shift and Phase 1 coverage apply to it (`storedPeople`)
+      (storedPeople || stored.people).forEach(p => set(p.name, personQueue(p), "day edited by a lead"));
     } else {
       // whoever holds a vacated anchor shift works it in VIP (the page does this before the covers and changes below)
       (anchorCovers || []).forEach(n => set(n, "vip", "anchor shift cover"));
@@ -165,7 +166,9 @@ export function intercomPlan(doc, fromKey, days, nowMs, ctx) {
     const key = addDaysKey(fromKey, i);
     let anchorNames = [];
     try { if (engine) anchorNames = engine.anchorGaps(key).map(g => engine.gapCover(key, g)).filter(Boolean); } catch (e) { anchorNames = []; }
-    const day = dayPlan(cal, key, liveFor, emails, anchorNames);
+    let storedPeople = null;
+    try { storedPeople = engine ? engine.storedPeopleFor(key) : null; } catch (e) { storedPeople = null; }
+    const day = dayPlan(cal, key, liveFor, emails, anchorNames, storedPeople);
     try {
       if (!engine) throw new Error(engineError);
       let weekendNames = [];
