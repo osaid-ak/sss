@@ -56,6 +56,10 @@ Admins and the Super Admin see the latest 500 sign-ins, refused sign-ins, sign-o
 
 `GET /api/v1/intercom-plan?from=YYYY-MM-DD&days=N` returns, per shift day, the people a lead moved between Phase 1 and VIP in the calendar. It uses an API key instead of a Google sign-in: `npx wrangler@4 secret put API_KEYS` with `label:key` pairs (`intercom:<64 random hex characters>`, several separated by commas; remove a pair to revoke it). Send `Authorization: Bearer <key>`. Read only, never cached; a refused call is logged once every 10 minutes. The full contract, the Python module and the rollout plan are in `../handoff/intercom/README.md`.
 
+## Commands that change the calendar (Slack)
+
+`POST /api/v1/calendar/command` (preview by default, `dryRun: false` plus a `commandId` to apply) and `POST /api/v1/calendar/undo`. They use a separate secret, `WRITE_KEYS` (`npx wrangler@4 secret put WRITE_KEYS`, `slack:<64 random hex characters>`; remove an entry to revoke it), and the asker's email in `actor.email`, who must be on the allowed list and an Admin or the Super Admin. A read key cannot write and a write key cannot read. Details, the operations and the Slack brief are in `../handoff/slack-calendar/README.md`. Nothing here ever writes to the Google Sheet.
+
 ## Limits
 
 - Admin and Member are enforced by the server for the user list and role changes. Inside the calendar, lead tools follow the role, but a Member's browser can still send schedule edits to the shared plan, because Members must be able to sync it.

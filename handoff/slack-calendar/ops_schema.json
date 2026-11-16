@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Calendar command operations",
+  "description": "The `ops` array sent to POST /api/v1/calendar/command. Dates are the lead's own words (never converted); the calendar resolves them.",
+  "type": "array",
+  "minItems": 1,
+  "maxItems": 8,
+  "items": {
+    "oneOf": [
+      {
+        "type": "object",
+        "properties": {
+          "op": { "const": "off" },
+          "people": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "dates": { "type": "string", "description": "e.g. today, this week and next, 20th Nov to 25th Nov" },
+          "note": { "type": "string" }
+        },
+        "required": ["op", "people", "dates"],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "op": { "const": "back" },
+          "people": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "dates": { "type": "string" }
+        },
+        "required": ["op", "people", "dates"],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "op": { "const": "takeover" },
+          "name": { "type": "string", "description": "who takes over" },
+          "from": { "type": "string", "description": "whose shift and queue they take" },
+          "shift": { "type": "string", "description": "only when the shift is not the other person's own that night: late, a clock (6pm, 10.30) or hours (7pm-4am)" },
+          "dates": { "type": "string" }
+        },
+        "required": ["op", "name", "from", "dates"],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "op": { "const": "move" },
+          "name": { "type": "string" },
+          "queue": { "enum": ["phase1", "vip", "both"] },
+          "shift": { "type": "string", "description": "late, a clock (10.30, 6pm) or hours (7pm-4am)" },
+          "dates": { "type": "string" }
+        },
+        "required": ["op", "name", "dates"],
+        "anyOf": [{ "required": ["queue"] }, { "required": ["shift"] }],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "op": { "const": "swap" },
+          "a": { "type": "string" },
+          "b": { "type": "string" },
+          "dates": { "type": "string" }
+        },
+        "required": ["op", "a", "b", "dates"],
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "properties": {
+          "op": { "const": "cover" },
+          "kind": { "enum": ["late", "phase1", "p1q", "anchor"] },
+          "name": { "type": "string" },
+          "for": { "type": "string", "description": "only for kind anchor: whose anchor shift it is" },
+          "dates": { "type": "string" },
+          "replace": { "type": "boolean" }
+        },
+        "required": ["op", "kind", "name", "dates"],
+        "additionalProperties": false
+      }
+    ]
+  }
+}

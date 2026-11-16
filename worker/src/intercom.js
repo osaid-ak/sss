@@ -76,7 +76,7 @@ export function emailFor(person, emails) {
 // One shift day: kind, what the calendar thinks the rotation is, the decisions (people whose queue differs from normal) and `queues`
 // (everyone's queue that day; null on a Sunday, which is closed).
 // `live` = { weekends: Map date -> { phase1, vip[] } | null, blocks: [...] | null } from the sheet (null: use the stored copy); `emails` = allowed emails.
-export function dayPlan(cal, key, live, emails) {
+export function dayPlan(cal, key, live, emails, anchorCovers) {
   live = live || {};
   const dow = weekdayOf(key);
   const out = { date: key, weekday: WEEKDAYS[dow], kind: dow === 0 ? "sunday" : dow === 6 ? "saturday" : "weekday", rotationPhase1: null, edited: false, decisions: [], queues: {} };
@@ -105,13 +105,31 @@ export function dayPlan(cal, key, live, emails) {
     if (stored && Array.isArray(stored.people)) {
       out.edited = true;
       stored.people.forEach(p => set(p.name, personQueue(p), "day edited by a lead"));
+    } else {
+      // whoever holds a vacated anchor shift works it in VIP (the page does this before the covers and changes below)
+      (anchorCovers || []).forEach(n => set(n, "vip", "anchor shift cover"));
     }
     const cov = (cal.lateCover && cal.lateCover[key]) || null;
     if (cov) {
+      // the page applies the Phase 1 queue cover first, then the late-shift covers on top
+      set(cov.p1q, "phase1", "Phase 1 queue cover");
       set(cov.vip, "vip", "VIP late shift cover");
       set(cov.phase1, "phase1", "Phase 1 late shift cover");
-      set(cov.p1q, "phase1", "Phase 1 queue cover");
     }
+    // changes made by a command (the page applies them last, on top of everything above), except those a hand-edited night already has built in
+    const baked = new Set((stored && stored.baked) || []);
+    const now = n => (decided.get(n) ? decided.get(n).queue : normal(n));
+    const usable = q => q === "phase1" || q === "vip" || q === "both" || q === "lead";
+    ((cal.changes && Array.isArray(cal.changes[key]) ? cal.changes[key] : [])).forEach(c => {
+      if (baked.has(c.id)) return;
+      if (c.type === "queue") set(c.name, c.queue, "calendar command");
+      else if (c.type === "takeover") { const q = c.shift && c.shift.kind === "anchor" ? "vip" : now(c.from); if (usable(q)) set(c.name, q, "calendar command"); }
+      else if (c.type === "swap") {
+        const qa = now(c.a), qb = now(c.b);
+        if (usable(qb)) set(c.a, qb, "calendar command");
+        if (usable(qa)) set(c.b, qa, "calendar command");
+      }
+    });
   }
   roster.forEach(p => {
     const d = decided.get(p.name);
@@ -145,7 +163,9 @@ export function intercomPlan(doc, fromKey, days, nowMs, ctx) {
   const list = [];
   for (let i = 0; i < days; i++) {
     const key = addDaysKey(fromKey, i);
-    const day = dayPlan(cal, key, liveFor, emails);
+    let anchorNames = [];
+    try { if (engine) anchorNames = engine.anchorGaps(key).map(g => engine.gapCover(key, g)).filter(Boolean); } catch (e) { anchorNames = []; }
+    const day = dayPlan(cal, key, liveFor, emails, anchorNames);
     try {
       if (!engine) throw new Error(engineError);
       let weekendNames = [];

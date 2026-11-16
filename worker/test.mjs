@@ -1,6 +1,8 @@
 // Offline checks for the sign-in gate and roles. Run: node test.mjs
 import worker, { PlanStore } from "./src/index.js";
 import { intercomPlan } from "./src/intercom.js";
+import { resolveDates, DateError } from "./src/dates.js";
+import { planCommand, undoCommand } from "./src/commands.js";
 
 const kvStore = new Map();
 const env = {
@@ -407,6 +409,105 @@ delete anchorPlan.lateCover["2026-11-23"].anchor;
 await putPlan(who.session, { version: 1, updatedAt: "2026-11-14T11:02:00.000Z", parts: 1, calendar: anchorPlan });
 const anchorLog = (await (await get("/api/log", who.session)).json()).log.map(e => e.detail || "").join(" | ");
 check("an anchor shift cover for a late-shift cover person is logged when added, changed and removed", /Added anchor shift cover Ammana for Raza on Mon 23 Nov/.test(anchorLog) && /Changed anchor shift cover for Raza on Mon 23 Nov from Ammana to Ivan/.test(anchorLog) && /Removed anchor shift cover Ivan for Raza on Mon 23 Nov/.test(anchorLog) && logsBefore > 0);
+
+// 8. dates in words
+const T = "2026-11-18"; // a Wednesday
+const dr = text => { try { return resolveDates(text, T); } catch (e) { return e instanceof DateError ? { error: e.message } : { crash: e.stack }; } };
+const keys = (a, b) => { const out = []; for (let k = a; k <= b; k = new Date(Date.parse(k) + 86400000).toISOString().slice(0, 10)) out.push(k); return out; };
+check("dates: today, tomorrow, a plain day and the same day written four ways", dr("today").dates.join() === "2026-11-18" && dr("tomorrow").dates.join() === "2026-11-19" && ["20th Nov", "Nov 20", "20 November 2026", "2026-11-20", "20/11", "20.11.2026", "11/20"].every(t => dr(t).dates.join() === "2026-11-20"));
+check("dates: 20th Nov to 25th Nov (and the other ways to write a range)", ["20th Nov to 25th Nov", "from 20th Nov to 25th Nov", "20 nov - 25 nov", "between 20 Nov and 25 Nov", "20th to 25th Nov", "20-25 Nov", "2026-11-20 to 2026-11-25"].every(t => dr(t).dates.join() === keys("2026-11-20", "2026-11-25").join()));
+check("dates: coming Monday to Thursday, and a bare weekday range", dr("from coming Monday to Thursday").dates.join() === keys("2026-11-23", "2026-11-26").join() && dr("mon to thu").dates.join() === keys("2026-11-23", "2026-11-26").join() && dr("coming monday").dates.join() === "2026-11-23" && dr("this friday").dates.join() === "2026-11-20");
+check("dates: this week (today to Friday), next week, this week and next, rest of the week", dr("this week").dates.join() === keys("2026-11-18", "2026-11-20").join() && dr("next week").dates.join() === keys("2026-11-23", "2026-11-27").join() && dr("this week and next").dates.length === 8 && dr("rest of the week").dates.join() === dr("this week").dates.join());
+check("dates: lists, 'till Friday', 'the 20th', counts of days", dr("today and tomorrow").dates.join() === "2026-11-18,2026-11-19" && dr("mon, tue and thu").dates.join() === "2026-11-19,2026-11-23,2026-11-24" && dr("till friday").dates.join() === keys("2026-11-18", "2026-11-20").join() && dr("the 20th").dates.join() === "2026-11-20" && dr("next 3 days").dates.join() === keys("2026-11-18", "2026-11-20").join());
+check("dates: a day and month with no year after the year end, an ambiguous number says how it was read", dr("Jan 5").dates.join() === "2027-01-05" && dr("12/11").warnings.length === 1 && dr("12/11").dates.join() === "2026-11-12" && dr("13/11").warnings.length === 0);
+check("dates: what cannot be read is an error that says what, and an end before the start is refused", /could not read "bogus"/.test(dr("bogus").error) && /before the start/.test(dr("25th Nov to 20th Nov").error) && /no dates/.test(dr("").error) && dr({ from: "2026-11-20", to: "2026-11-22" }).dates.length === 3 && dr({ dates: ["2026-11-20", "2026-11-19"] }).dates.join() === "2026-11-19,2026-11-20");
+
+// 9. commands (pure): off, back, takeover, move, swap, cover, undo
+const CMD = (name, extra) => Object.assign({ name, roles: { vip: true }, start: 6, len: 18, brk: 14, split: null, queue: "vip", group: "VIP" }, extra || {});
+const cmdCal = {
+  people: [CMD("Raza", { start: 4, brk: 12 }), CMD("Ivan"), CMD("Ammana"), CMD("Zarminay"), CMD("Jawad", { start: 8, brk: 16 }), CMD("Osaid", { start: 2, brk: 10, roles: { lead: true, vip: true } }), CMD("Ayeshah", { roles: { phase1: true }, queue: "phase1", group: "Phase 1" })],
+  vipPlan: { blocks: [{ start: "2026-11-16", end: "2026-11-27", late: "Ammana", phase1: "Jawad", cover1: "", cover2: "" }], readAt: "x" },
+  leaves: [], holidays: [], lateCover: {}, days: {}, changes: {}, lineBars: [], sheetPlan: { hours: {}, line: [] }
+};
+const cmdDoc = { updatedAt: "2026-11-18T00:00:00.000Z", calendar: cmdCal };
+const NOW = Date.parse("2026-11-18T05:00:00Z");
+const cmd = (ops, doc) => planCommand(doc || cmdDoc, { commandId: "cmd-test-1", actor: { email: "ann@example.com" }, ops }, null, NOW);
+const off = cmd([{ op: "off", people: ["jawad"], dates: "this week and next" }]);
+check("command: someone off this week and next becomes approved leave, Sundays skipped, summary in words", off.ok && off.cal.leaves.length === 2 && off.cal.leaves.every(l => l.status === "approved" && l.name === "Jawad") && off.result.summary[0] === "Jawad is off Wed 18 Nov to Fri 20 Nov, Mon 23 Nov to Fri 27 Nov (approved leave).");
+const offDay = intercomPlan({ updatedAt: "x", calendar: off.cal }, "2026-11-18", 1, NOW, { live: null, emails: [] }).days[0];
+check("command: ...and the calendar API then says Jawad is off and the Phase 1 need is new", offDay.away.map(a => a.name).join() === "Jawad" && off.result.needsCover.some(n => n.new && /Phase 1 needs cover. Jawad is off/.test(n.text)));
+const both = cmd([{ op: "off", people: ["jawad"], dates: "today" }, { op: "takeover", name: "raza", from: "jawad", dates: "today" }]);
+const bothDay = intercomPlan({ updatedAt: "x", calendar: both.cal }, "2026-11-18", 1, NOW, { live: null, emails: [] }).days[0];
+check("command: 'jawad is off today and raza covers him': Raza works Jawad's 8pm-5am Phase 1 shift, and the 6pm anchor Raza left is an open need that names why", both.ok && bothDay.covers.some(c => c.text === "Raza is covering Jawad on their 8pm–5am Phase 1 shift.") && bothDay.needsCover.some(n => n.text === "Anchor shift 6pm–3am VIP is uncovered. Raza is covering Jawad." ) && bothDay.queues.Raza === "phase1");
+const mv = cmd([{ op: "move", name: "Jawad", queue: "phase1", shift: "10.30", dates: "from 20th Nov to 25th Nov" }]);
+check("command: 'move Jawad to Phase 1 and the 10.30 shift from 20th Nov to 25th Nov': only the days named, Saturday and Sunday skipped with the reason", mv.ok && Object.keys(mv.cal.changes).join() === "2026-11-20,2026-11-23,2026-11-24,2026-11-25" && mv.result.skipped.length === 2 && /Saturdays follow the Weekend Cover/.test(mv.result.skipped[0]) && mv.result.summary[0] === "Jawad moved to Phase 1 and to the late shift 10:30pm–7:30am Fri 20 Nov, Mon 23 Nov to Wed 25 Nov.");
+const mvPlan = intercomPlan({ updatedAt: "x", calendar: mv.cal }, "2026-11-19", 3, NOW, { live: null, emails: [] });
+check("command: the move shows on its days only (19th untouched, 20th moved)", !mvPlan.days[0].covers.some(c => /10:30pm/.test(c.text) && c.name === "Jawad") && mvPlan.days[1].covers.some(c => c.name === "Jawad" && c.text === "Jawad is working 10:30pm–7:30am instead of their usual 8pm–5am."));
+const sw = cmd([{ op: "swap", a: "jawad", b: "raza", dates: "coming Monday to Thursday" }]);
+const swDay = intercomPlan({ updatedAt: "x", calendar: sw.cal }, "2026-11-23", 1, NOW, { live: null, emails: [] }).days[0];
+check("command: a swap exchanges shifts and queues on the nights named", sw.ok && swDay.queues.Jawad === "vip" && swDay.queues.Raza === "phase1" && swDay.covers.some(c => c.name === "Jawad" && /swapped with Raza/.test(c.text)) && sw.result.summary[0] === "Jawad and Raza swap shifts Mon 23 Nov to Thu 26 Nov.");
+const chain = cmd([{ op: "off", people: ["jawad"], dates: "today" }, { op: "takeover", name: "raza", from: "jawad", shift: "10.30", dates: "today" }, { op: "takeover", name: "zarminay", from: "raza", shift: "6pm", dates: "today" }]);
+const chainDay = chain.ok && intercomPlan({ updatedAt: "x", calendar: chain.cal }, "2026-11-18", 1, NOW, { live: null, emails: [] }).days[0];
+check("command: 'Jawad is off, Raza covers him at 10.30, and because Raza is an anchor Zarminay covers Raza at 6pm': each cover is stated as the calendar words it, with nothing left open for Raza's anchor", chain.ok && chainDay.covers.filter(c => c.kind === "takeover").map(c => c.text).sort().join(" | ") === "Raza is covering Jawad on their 10:30pm–7:30am Phase 1 shift. | Zarminay is covering Raza on their 6pm–3am VIP shift." && !chainDay.needsCover.some(n => /6pm–3am/.test(n.text)) && chainDay.covers.filter(c => /Zarminay is covering Raza/.test(c.text)).length === 1 && chainDay.queues.Zarminay === "vip" && chainDay.queues.Raza === "phase1");
+check("command: without the 6pm Zarminay leaves nothing for Raza's anchor, so it is an open need until somebody takes it", (() => { const only = cmd([{ op: "off", people: ["jawad"], dates: "today" }, { op: "takeover", name: "raza", from: "jawad", shift: "10.30", dates: "today" }]); const d = intercomPlan({ updatedAt: "x", calendar: only.cal }, "2026-11-18", 1, NOW, { live: null, emails: [] }).days[0]; return d.needsCover.some(n => n.text === "Anchor shift 6pm–3am VIP is uncovered. Raza is covering Jawad."); })());
+// the golden phrases handed to the Slack side: every one is accepted (or refused for the stated reason) by the real command logic
+import { readFileSync } from "node:fs";
+const golden = JSON.parse(readFileSync(new URL("../handoff/slack-calendar/golden.json", import.meta.url), "utf8"));
+const goldenBad = golden.filter(g => {
+  const r = cmd(g.ops);
+  return g.ok ? !(r.ok && r.result.summary.length) : r.ok;
+});
+check("golden phrases for the Slack side (" + golden.length + "): each is accepted, or refused for its stated reason", goldenBad.length === 0 && golden.length >= 25);
+if (goldenBad.length) console.log(goldenBad.map(g => "  golden: " + g.say + " => " + JSON.stringify(cmd(g.ops).errors || cmd(g.ops).result.summary)).join(String.fromCharCode(10)));
+check("command: a night the Weekend Cover sheet rules (Saturday) cannot be moved or swapped, only marked off", !cmd([{ op: "swap", a: "jawad", b: "raza", dates: "2026-11-21" }]).ok && cmd([{ op: "off", people: ["ivan"], dates: "2026-11-21" }]).ok);
+check("command: past days, closed Sundays, unknown names and clashes are refused with a reason", /already past/.test(cmd([{ op: "off", people: ["ivan"], dates: "yesterday" }]).errors[0]) && /Sunday is closed/.test(cmd([{ op: "off", people: ["ivan"], dates: "2026-11-22" }]).errors[0]) && /don't know anyone called "bob"/.test(cmd([{ op: "off", people: ["bob"], dates: "today" }]).errors[0]) && /already has a cover or move/.test(cmd([{ op: "takeover", name: "raza", from: "jawad", dates: "today" }, { op: "swap", a: "raza", b: "ivan", dates: "today" }]).errors.join()));
+check("command: leads are never used as cover, a person who is off cannot cover", /lead/.test(cmd([{ op: "takeover", name: "osaid", from: "jawad", dates: "today" }]).errors[0]) && /off on Wed 18 Nov, so cannot cover/.test(cmd([{ op: "off", people: ["raza"], dates: "today" }, { op: "takeover", name: "raza", from: "jawad", dates: "today" }]).errors.join()));
+const lc = cmd([{ op: "cover", kind: "late", name: "ivan", dates: "today" }, { op: "cover", kind: "p1q", name: "zarminay", dates: "today" }]);
+check("command: the calendar's own cover slots (late shift, Phase 1 from VIP)", lc.ok && lc.cal.lateCover["2026-11-18"].vip === "Ivan" && lc.cal.lateCover["2026-11-18"].p1q === "Zarminay");
+const ac = cmd([{ op: "cover", kind: "late", name: "osaid", dates: "today" }]);
+check("command: an anchor cover needs an open anchor that the calendar (not the sheet) owns", !cmd([{ op: "cover", kind: "anchor", name: "ivan", for: "jawad", dates: "today" }]).ok && /filled in on the sheet/.test(cmd([{ op: "cover", kind: "anchor", name: "ivan", for: "jawad", dates: "today" }]).errors[0]));
+const back = planCommand({ updatedAt: "x", calendar: off.cal }, { commandId: "cmd-test-2", actor: { email: "ann@example.com" }, ops: [{ op: "back", people: ["jawad"], dates: "2026-11-24 to 2026-11-25" }] }, null, NOW);
+check("command: back early splits the leave: the days before and after stay, the days named are cancelled", back.ok && back.cal.leaves.filter(l => l.status === "approved").map(l => l.start + ">" + l.end).sort().join() === "2026-11-18>2026-11-20,2026-11-23>2026-11-23,2026-11-26>2026-11-27" && back.cal.leaves.some(l => l.status === "cancelled" && l.start === "2026-11-24" && l.end === "2026-11-25"));
+const undone = undoCommand({ updatedAt: "x", calendar: back.cal }, { undo: back.undo, summary: back.result.summary }, NOW);
+check("command: undo puts the leave back exactly", JSON.stringify(undone.cal.leaves.filter(l => l.name === "Jawad").map(l => [l.start, l.end, l.status]).sort()) === JSON.stringify(off.cal.leaves.map(l => [l.start, l.end, l.status]).sort()));
+const undoMv = undoCommand({ updatedAt: "x", calendar: mv.cal }, { undo: mv.undo, summary: mv.result.summary }, NOW);
+check("command: undo removes the changes it made and nothing else", Object.keys(undoMv.cal.changes).length === 0 && JSON.stringify(undoMv.cal.people) === JSON.stringify(cmdCal.people));
+
+// 10. the write API: keys, who may ask, preview, apply, repeat, undo, log
+env.WRITE_KEYS = "slack:write-key-for-slack-123";
+env.TEST_TODAY = "1";
+const wpost = (path, key, body) => worker.fetch(new Request(ORIGIN + path, { method: "POST", headers: Object.assign({ "Content-Type": "application/json" }, key ? { Authorization: "Bearer " + key } : {}), body: JSON.stringify(body) }), env);
+const WK = "write-key-for-slack-123";
+const admin = { email: "ann@example.com" };
+const base = { actor: admin, today: "2026-11-18", ops: [{ op: "off", people: ["ammana"], dates: "20th Nov to 24th Nov" }] };
+env.API_KEYS = "intercom:key-for-intercom-123";
+check("write API: no key, a wrong key, and a READ key are all refused", (await wpost("/api/v1/calendar/command", null, base)).status === 401 && (await wpost("/api/v1/calendar/command", "nope", base)).status === 401 && (await wpost("/api/v1/calendar/command", "key-for-intercom-123", base)).status === 401);
+check("write API: a write key cannot be used to read", (await keyed("/api/v1/intercom-plan", WK)).status === 401);
+check("write API: only Admins may ask (a Member, an unknown person and a missing person are refused)", (await wpost("/api/v1/calendar/command", WK, Object.assign({}, base, { actor: { email: "bob@example.com" } }))).status === 403 && (await wpost("/api/v1/calendar/command", WK, Object.assign({}, base, { actor: { email: "stranger@example.com" } }))).status === 403 && (await wpost("/api/v1/calendar/command", WK, Object.assign({}, base, { actor: {} }))).status === 400);
+const planBefore = await (await get("/api/team/plan", who.session)).text();
+const prev = await wpost("/api/v1/calendar/command", WK, base);
+const prevBody = await prev.json();
+check("write API: with no dryRun it is a preview: it says exactly what would change and writes nothing", prev.status === 200 && prevBody.dryRun === true && prevBody.summary[0] === "Ammana is off Fri 20 Nov to Tue 24 Nov (approved leave)." && prevBody.previewHash && (await (await get("/api/team/plan", who.session)).text()) === planBefore);
+check("write API: applying needs a command id", (await wpost("/api/v1/calendar/command", WK, Object.assign({}, base, { dryRun: false }))).status === 400);
+check("write API: an apply whose preview no longer matches is refused and changes nothing", (await wpost("/api/v1/calendar/command", WK, Object.assign({}, base, { dryRun: false, commandId: "cmd-apply-0001", previewHash: "stale" }))).status === 409 && (await (await get("/api/team/plan", who.session)).text()) === planBefore);
+const applied = await wpost("/api/v1/calendar/command", WK, Object.assign({}, base, { dryRun: false, commandId: "cmd-apply-0002", previewHash: prevBody.previewHash }));
+const appliedBody = await applied.json();
+const planAfter = JSON.parse(await (await get("/api/team/plan", who.session)).text());
+check("write API: applying makes exactly the previewed change, in the shared plan, with a newer version", applied.status === 200 && appliedBody.ok && appliedBody.commandId === "cmd-apply-0002" && planAfter.calendar.leaves.some(l => l.name === "Ammana" && l.start === "2026-11-20" && l.end === "2026-11-24" && l.status === "approved") && planAfter.updatedAt > JSON.parse(planBefore).updatedAt);
+const replayed = await wpost("/api/v1/calendar/command", WK, Object.assign({}, base, { dryRun: false, commandId: "cmd-apply-0002" }));
+check("write API: the same command id again is a replay and does not add the leave twice", (await replayed.json()).replayed === true && JSON.parse(await (await get("/api/team/plan", who.session)).text()).calendar.leaves.filter(l => l.name === "Ammana" && l.start === "2026-11-20").length === 1);
+const cmdLog = (await (await get("/api/log", who.session)).json()).log;
+check("write API: the activity log says who asked, via Slack, with the summary and the change lines", cmdLog.some(e => e.event === "calendar command" && e.via === "Slack" && e.email === "ann@example.com" && e.name === "Ann" && /Ammana is off Fri 20 Nov to Tue 24 Nov/.test(e.detail)) && cmdLog.some(e => e.event === "plan edit" && e.via === "Slack" && /Added approved leave for Ammana/.test(e.detail)));
+check("write API: the calendar API now reports the leave (Ammana off on the 20th)", (await (await keyed("/api/v1/intercom-plan?from=2026-11-20&days=1", "key-for-intercom-123")).json()).days[0].away.some(a => a.name === "Ammana"));
+const bad = await wpost("/api/v1/calendar/command", WK, Object.assign({}, base, { ops: [{ op: "off", people: ["nobody"], dates: "today" }] }));
+check("write API: a command that cannot be done is a 422 with the reasons and writes nothing", bad.status === 422 && /don't know anyone/.test((await bad.json()).errors[0]));
+const undo = await wpost("/api/v1/calendar/undo", WK, { actor: admin, commandId: "cmd-apply-0002" });
+check("write API: undo takes the command back, once", undo.status === 200 && !JSON.parse(await (await get("/api/team/plan", who.session)).text()).calendar.leaves.some(l => l.name === "Ammana" && l.start === "2026-11-20") && (await wpost("/api/v1/calendar/undo", WK, { actor: admin, commandId: "cmd-apply-0002" })).status === 409 && (await wpost("/api/v1/calendar/undo", WK, { actor: admin, commandId: "cmd-unknown-9" })).status === 404);
+// a conditional write is refused when the plan has moved on (this is how two writers never overwrite each other)
+const stub = env.PLAN.get(env.PLAN.idFromName("plan"));
+const cur = JSON.parse(await (await stub.fetch("https://plan.internal/doc", { method: "GET" })).text());
+check("write API: a write made from an old version is refused (409), one made from the current version is accepted", (await stub.fetch("https://plan.internal/doc", { method: "POST", body: JSON.stringify(cur), headers: { "X-Expect-Updated-At": "old" } })).status === 409 && (await stub.fetch("https://plan.internal/doc", { method: "POST", body: JSON.stringify(cur), headers: { "X-Expect-Updated-At": cur.updatedAt } })).status === 200);
+delete env.WRITE_KEYS; delete env.TEST_TODAY;
 delete env.API_KEYS;
 check("with no keys configured every call is refused", (await keyed("/api/v1/intercom-plan", "key-for-intercom-123")).status === 401);
 

@@ -9,6 +9,7 @@
 //   /api/log        Admins: recent sign-ins, sign-outs and user changes
 //   /api/team/plan the shared team plan, kept in a Durable Object (signed-in people only)
 //   /api/v1/*      read-only calls for automations, with an API key instead of a Google sign-in (see automationApi)
+//   /api/v1/calendar/*  commands that change the calendar (preview, apply, undo), with a WRITE key and the person who asked (see calendarApi)
 //   everything else the calendar page (static asset, signed-in people only)
 //
 // Secrets (set with `wrangler secret put`, never committed):
@@ -16,12 +17,15 @@
 //   ALLOWED_EMAILS  comma-separated: everyone who may sign in
 //   ADMIN_EMAILS    comma-separated: who starts as an Admin (everyone else starts as a Member)
 //   SUPER_ADMIN     one email: always allowed, always the Super Admin, can change Admins' roles
+//   WRITE_KEYS      the same format, for the Slack /calendar bot only: a read key can never write, and a write key is not accepted for reading
 //   API_KEYS        comma-separated label:key pairs for automations, e.g. intercom:<long random string> (one label per automation, so one can be revoked alone)
 // Role changes, added people and removed people made in the app are kept in the ROLES key-value store. Roles win over ADMIN_EMAILS.
 // ALLOWED_EMAILS is re-read on every request, so removing an email locks that person out immediately.
 
 import { intercomPlan, shiftDayAt, validDate } from "./intercom.js";
 import { readSheetsLive } from "./sheets.js";
+import { planCommand, undoCommand } from "./commands.js";
+import { slotLabel } from "./covers.js";
 
 const SESSION_COOKIE = "sss_session";
 const STATE_COOKIE = "sss_state";
@@ -125,6 +129,7 @@ async function logEvents(env, request, email, items) {
     items.forEach(it => {
       const entry = { t, event: it.event, email: String(email || "").toLowerCase(), name: displayName(email) };
       if (it.detail) entry.detail = it.detail;
+      if (it.via) entry.via = it.via;
       if (country) entry.country = country;
       if (ip) entry.ip = ip;
       if (ua) entry.ua = ua.slice(0, 200);
@@ -154,7 +159,17 @@ function byKey(list, key) {
   (Array.isArray(list) ? list : []).forEach(x => { if (x && x[key] != null) out[x[key]] = x; });
   return out;
 }
-function planChanges(prev, next) {
+function changeText(c) {
+  if (c.type === "queue") return c.name + " to " + (c.queue === "phase1" ? "Phase 1" : c.queue === "vip" ? "VIP" : "Phase 1 and VIP");
+  if (c.type === "takeover") return c.name + " takes over " + c.from + "'s shift";
+  if (c.type === "swap") return c.a + " and " + c.b + " swap shifts";
+  if (c.type === "shift") {
+    const sh = c.shift || {};
+    return c.name + " to " + (sh.kind === "late" ? "the late shift" : sh.kind === "anchor" ? "anchor shift " + (sh.n + 1) : slotLabel(sh.start) + "–" + slotLabel(sh.start + sh.len));
+  }
+  return c.type + " change";
+}
+function planChanges(prev, next, limit) {
   const out = [];
   if (!next || typeof next !== "object") return out;
   if (!prev) return ["Started the team plan"];
@@ -230,7 +245,14 @@ function planChanges(prev, next) {
     else if (a && !b) out.push("Reset the schedule for " + dayLabel(key) + " to the default");
     else if (a && b && !same([a.people, a.lineBars], [b.people, b.lineBars])) out.push("Edited the schedule for " + dayLabel(key));
   });
-  if (out.length > 15) return ["Large change (" + out.length + " items): probably an import or a restore"];
+  // changes made by a command, per night
+  const pg = prev.changes || {}, ng = next.changes || {};
+  [...new Set([...Object.keys(pg), ...Object.keys(ng)])].sort().forEach(date => {
+    const a = byKey(pg[date], "id"), b = byKey(ng[date], "id");
+    Object.keys(b).forEach(id => { if (!a[id]) out.push("Changed " + dayLabel(date) + ": " + changeText(b[id]) + (b[id].by ? " (by " + b[id].by + (b[id].via ? " via " + b[id].via : "") + ")" : "")); });
+    Object.keys(a).forEach(id => { if (!b[id]) out.push("Removed the change on " + dayLabel(date) + ": " + changeText(a[id])); });
+  });
+  if (out.length > (limit || 15)) return ["Large change (" + out.length + " items): probably an import or a restore"];
   return out;
 }
 
@@ -413,12 +435,35 @@ export class PlanStore {
   constructor(state) { this.state = state; }
   async fetch(request) {
     const headers = { "Content-Type": "application/json" };
+    const path = new URL(request.url).pathname;
+    // small records for commands (the result of each, and what is needed to undo it)
+    if (path.startsWith("/kv/")) {
+      const key = "kv:" + path.slice(4);
+      if (request.method === "GET") {
+        const v = await this.state.storage.get(key);
+        return v ? new Response(v, { headers }) : new Response('{"error":"none"}', { status: 404, headers });
+      }
+      if (request.method === "PUT") {
+        await this.state.storage.put(key, await request.text());
+        return new Response('{"ok":true}', { headers });
+      }
+      return new Response("Method not allowed", { status: 405 });
+    }
     if (request.method === "GET") {
       const doc = await this.state.storage.get("doc");
       return doc ? new Response(doc, { headers }) : new Response('{"error":"no plan yet"}', { status: 404, headers });
     }
     if (request.method === "POST") {
-      await this.state.storage.put("doc", await request.text());
+      const body = await request.text();
+      // a write that says which version it was made from is refused when the plan has moved on (the caller reads again and retries)
+      const expect = request.headers.get("X-Expect-Updated-At");
+      if (expect !== null) {
+        const cur = await this.state.storage.get("doc");
+        let curAt = "";
+        try { curAt = JSON.parse(cur).updatedAt; } catch (e) { curAt = ""; }
+        if (curAt !== expect) return new Response('{"error":"the plan changed"}', { status: 409, headers });
+      }
+      await this.state.storage.put("doc", body);
       return new Response('{"ok":true}', { headers });
     }
     return new Response("Method not allowed", { status: 405 });
@@ -464,12 +509,13 @@ async function sha256(text) {
   return new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(text)));
 }
 // The label of the key in the Authorization header, or null. Compared as hashes in constant time; the keys are never logged or returned.
-async function apiKeyLabel(request, env) {
+async function apiKeyLabel(request, env, secret) {
+  const keys = env[secret || "API_KEYS"];
   const m = /^Bearer\s+(\S+)$/i.exec(request.headers.get("Authorization") || "");
-  if (!m || !env.API_KEYS) return null;
+  if (!m || !keys) return null;
   const given = await sha256(m[1]);
   let found = null;
-  for (const entry of String(env.API_KEYS).split(",")) {
+  for (const entry of String(keys).split(",")) {
     const i = entry.indexOf(":");
     if (i < 1) continue;
     const want = await sha256(entry.slice(i + 1).trim());
@@ -511,6 +557,123 @@ async function automationApi(request, env, url) {
   return json(intercomPlan(doc, from, days, now, { live, emails }));
 }
 
+// ---- commands that change the calendar (Slack /calendar): preview, apply, undo
+async function sha256hex(text) {
+  return Array.from(await sha256(text)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
+// a new version stamp that is always later than the stored one (the browsers merge by it)
+function nextStamp(old, nowMs) {
+  let iso = new Date(nowMs).toISOString();
+  if (old && iso <= old) iso = new Date(Date.parse(old) + 1).toISOString();
+  return iso;
+}
+async function calendarApi(request, env, url) {
+  const refuse = async (detail, status, error) => {
+    await logEvent(env, request, "api refused", "api", detail);
+    return json({ ok: false, error }, status);
+  };
+  const label = await apiKeyLabel(request, env, "WRITE_KEYS");
+  if (!label) {
+    if (env.ROLES) {
+      try {
+        const last = Number(await env.ROLES.get("apifail")) || 0;
+        if (Date.now() - last > 600000) { await env.ROLES.put("apifail", String(Date.now())); await logEvent(env, request, "api refused", "api", "request to " + url.pathname + " without a valid write key"); }
+      } catch (e) { /* never break the answer */ }
+    }
+    return json({ ok: false, error: "a valid write key is required (Authorization: Bearer <key>)" }, 401);
+  }
+  if (request.method !== "POST") return json({ ok: false, error: "POST only" }, 405);
+  let body;
+  try { body = await request.json(); } catch (e) { return json({ ok: false, error: "the body is not JSON" }, 400); }
+  if (!body || typeof body !== "object") return json({ ok: false, error: "the body is not JSON" }, 400);
+  // who is asking: only people who are allowed in AND are Admins (or the Super Admin) may change the calendar
+  const actor = String((body.actor && body.actor.email) || "").trim().toLowerCase();
+  if (!actor.includes("@")) return json({ ok: false, error: "actor.email is required (the person who typed the command)" }, 400);
+  if (!(await isAllowed(env, actor))) return refuse("calendar command by " + actor + " refused: not on the allowed list", 403, actor + " is not allowed to use the calendar");
+  const role = await roleOf(env, actor);
+  if (role !== "admin" && role !== "super") return refuse("calendar command by " + actor + " refused: not an Admin", 403, "only Admins and the Super Admin can change the calendar");
+  if (!env.PLAN) return json({ ok: false, error: "plan store is not configured" }, 500);
+  const stub = env.PLAN.get(env.PLAN.idFromName("plan"));
+  const readDoc = async () => {
+    const res = await stub.fetch("https://plan.internal/doc", { method: "GET" });
+    if (!res.ok) return null;
+    try { const d = JSON.parse(await res.text()); return d && d.calendar ? d : null; } catch (e) { return null; }
+  };
+  const kvGet = async key => { const r = await stub.fetch("https://plan.internal/kv/" + key, { method: "GET" }); return r.ok ? JSON.parse(await r.text()) : null; };
+  const kvPut = (key, v) => stub.fetch("https://plan.internal/kv/" + key, { method: "PUT", body: JSON.stringify(v) });
+  const idOk = id => /^[A-Za-z0-9_-]{8,64}$/.test(String(id || ""));
+  const writeDoc = async (doc, calendar, nowMs) => {
+    const text = JSON.stringify({ version: 1, updatedAt: nextStamp(doc.updatedAt, nowMs), parts: 1, calendar });
+    if (text.length > PLAN_MAX) return { status: 413 };
+    const w = await stub.fetch("https://plan.internal/doc", { method: "POST", body: text, headers: { "X-Expect-Updated-At": doc.updatedAt } });
+    return { status: w.status };
+  };
+
+  if (url.pathname === "/api/v1/calendar/command") {
+    const dryRun = body.dryRun !== false; // a preview unless it says otherwise
+    const id = String(body.commandId || "");
+    if (!dryRun) {
+      if (!idOk(id)) return json({ ok: false, error: "commandId is required to apply (8 to 64 letters, digits, - or _): it makes a repeated click harmless" }, 400);
+      const done = await kvGet("cmd-" + id);
+      if (done) return json(Object.assign({}, done, { replayed: true }));
+    }
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const doc = await readDoc();
+      if (!doc) return json({ ok: false, error: "the team plan is empty or unavailable" }, 503);
+      const live = await readSheetsLive();
+      const nowMs = Date.now();
+      let r;
+      try { r = planCommand(doc, { ops: body.ops, today: env.TEST_TODAY ? body.today : undefined, commandId: dryRun ? "preview" : id, actor: { email: actor }, via: "Slack" }, live, nowMs); }
+      catch (e) { return json({ ok: false, error: "the command could not be worked out: " + String((e && e.message) || e).slice(0, 200) }, 500); }
+      if (!r.ok) return json({ ok: false, errors: r.errors, warnings: r.warnings || [], skipped: r.skipped || [] }, 422);
+      const previewHash = await sha256hex(JSON.stringify([r.result.summary, r.result.dates, r.result.skipped]));
+      const answer = Object.assign({ ok: true, dryRun, previewHash, commandId: dryRun ? null : id, actor: displayName(actor), source: { weekendCover: live.weekends ? "sheet" : "stored", rotation: live.blocks ? "sheet" : "stored" } }, r.result);
+      if (dryRun) return json(answer);
+      if (body.previewHash && body.previewHash !== previewHash) {
+        return json({ ok: false, error: "the calendar changed since the preview, so nothing was applied; run the command again", now: answer }, 409);
+      }
+      const w = await writeDoc(doc, r.cal, nowMs);
+      if (w.status === 413) return json({ ok: false, error: "the plan is too large" }, 413);
+      if (w.status === 409) continue; // someone saved in between: read again and redo the check
+      if (w.status !== 200) return json({ ok: false, error: "the plan could not be saved" }, 500);
+      await kvPut("cmd-" + id, answer);
+      await kvPut("undo-" + id, { undo: r.undo, summary: r.result.summary, actor, at: new Date(nowMs).toISOString(), undone: false });
+      try {
+        const lines = planChanges(doc.calendar, r.cal, 500);
+        await logEvents(env, request, actor, [{ event: "calendar command", via: "Slack", detail: "[Slack] " + r.result.summary.join(" ") }].concat(lines.map(detail => ({ event: "plan edit", via: "Slack", detail: "[Slack] " + detail }))));
+      } catch (e) { /* the change is saved */ }
+      return json(answer);
+    }
+    return json({ ok: false, error: "the calendar kept changing while this ran; nothing was applied, try again" }, 409);
+  }
+
+  if (url.pathname === "/api/v1/calendar/undo") {
+    const id = String(body.commandId || "");
+    if (!idOk(id)) return json({ ok: false, error: "commandId of the command to undo is required" }, 400);
+    const rec = await kvGet("undo-" + id);
+    if (!rec) return json({ ok: false, error: "no command with that id was found" }, 404);
+    if (rec.undone) return json({ ok: false, error: "that command was already undone" }, 409);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const doc = await readDoc();
+      if (!doc) return json({ ok: false, error: "the team plan is empty or unavailable" }, 503);
+      const nowMs = Date.now();
+      const r = undoCommand(doc, rec, nowMs);
+      const w = await writeDoc(doc, r.cal, nowMs);
+      if (w.status === 409) continue;
+      if (w.status !== 200) return json({ ok: false, error: "the plan could not be saved" }, 500);
+      rec.undone = true; rec.undoneBy = actor; rec.undoneAt = r.at;
+      await kvPut("undo-" + id, rec);
+      try {
+        const lines = planChanges(doc.calendar, r.cal, 500);
+        await logEvents(env, request, actor, [{ event: "calendar command", via: "Slack", detail: "[Slack] " + r.lines.join(" ") }].concat(lines.map(detail => ({ event: "plan edit", via: "Slack", detail: "[Slack] " + detail }))));
+      } catch (e) { /* the change is saved */ }
+      return json({ ok: true, undone: true, commandId: id, summary: r.lines, notes: r.notes });
+    }
+    return json({ ok: false, error: "the calendar kept changing while this ran; nothing was undone, try again" }, 409);
+  }
+  return json({ ok: false, error: "not found" }, 404);
+}
+
 export default {
   async fetch(request, env) {
     if (!env.SESSION_SECRET || !env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET) {
@@ -518,6 +681,7 @@ export default {
     }
     const url = new URL(request.url);
     const path = url.pathname;
+    if (path.startsWith("/api/v1/calendar/")) return calendarApi(request, env, url);
     if (path.startsWith("/api/v1/")) return automationApi(request, env, url);
     if (path === "/auth/login") return login(request, env);
     if (path === "/auth/callback") return callback(request, env);
