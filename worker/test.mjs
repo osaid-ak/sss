@@ -367,6 +367,23 @@ check("Phase 1 queue cover names the rotation person it replaces", texts("2026-1
 check("Support Line: the sheet's backup takes the slot of an owner who is off, and says how the shift moved", texts("2026-11-18").includes("Ivan is covering Laraib on Support Line 6pm–10pm. Ivan's shift was adjusted to 6pm–3am to cover the Support Line."));
 check("needs cover: a late shift without a Phase 1 person, an uncovered anchor, and a Support Line slot nobody can take", cv("2026-11-19").needsCover.some(n => n.kind === "late" && /needs a Phase 1 person/.test(n.text)) && cv("2026-11-19").needsCover.some(n => n.kind === "anchor" && /Anchor 2 on the VIP Coverage Plan sheet/.test(n.text)) && cv("2026-11-19").needsCover.some(n => n.kind === "line" && n.text === "Support Line 10pm–1am owner Qasim is off. Backup Ivan is off too."));
 check("the rotation people are named (Late Shift person); a saved night this week is left as saved (no anchor cover) while a saved night from next week follows the sheet", cv("2026-11-16").lateShift === "Raza" && !cv("2026-11-20").covers.some(c => c.kind === "anchor") && cv("2026-11-24").covers.some(c => c.kind === "anchor" && c.name === "Zarminay"));
+
+// saved nights: from next week on the sheet's Late Shift and Phase 1 coverage apply to them, except to people edited directly; this week is left as saved
+const savedPeople = (rotName, extra) => coverCal.people.map(p => { const q = JSON.parse(JSON.stringify(p)); if (q.name === rotName) { q.roles = { phase1: true }; q.queue = "phase1"; } return q; });
+const followCal = day => Object.assign({}, coverCal, { days: Object.assign({}, coverCal.days, day) });
+const queuesOn = (cal, date) => intercomPlan({ updatedAt: "x", calendar: cal }, date, 1, Date.parse("2026-11-16T10:00:00Z"), { live: null, emails: [] }).days[0].queues;
+const staleNext = followCal({ "2026-11-25": { people: savedPeople("Ivan"), lineBars: [], rot: ["Ivan"] } });
+const staleNextEdited = followCal({ "2026-11-25": { people: savedPeople("Ivan"), lineBars: [], rot: ["Ivan"], touched: ["Ivan"] } });
+const staleThisWeek = followCal({ "2026-11-19": { people: savedPeople("Ivan"), lineBars: [], rot: ["Ivan"] } });
+const legacyNext = followCal({ "2026-11-25": { people: savedPeople("Ivan"), lineBars: [] } });
+check("saved night next week: the sheet's Phase 1 person is on Phase 1 and the old rotation person goes back to their roster queue", queuesOn(staleNext, "2026-11-25").Jawad === "phase1" && queuesOn(staleNext, "2026-11-25").Ivan === "vip");
+check("saved night next week: a person edited directly (touched) stays as edited while the sheet's Phase 1 person still follows", queuesOn(staleNextEdited, "2026-11-25").Ivan === "phase1" && queuesOn(staleNextEdited, "2026-11-25").Jawad === "phase1");
+check("saved night this week is left exactly as saved", queuesOn(staleThisWeek, "2026-11-19").Ivan === "phase1" && queuesOn(staleThisWeek, "2026-11-19").Jawad === "vip");
+check("a night saved before the rotation was recorded: whoever sits on Phase 1 against their roster queue is taken to be the old rotation", queuesOn(legacyNext, "2026-11-25").Ivan === "vip" && queuesOn(legacyNext, "2026-11-25").Jawad === "phase1");
+// nobody on the Support Line for a stretch is a need for a lead
+const lineCal = { people: [CP("Solo", { roles: { vip: true, line: true } })], vipPlan: { blocks: [], readAt: "x" }, leaves: [], holidays: [], lateCover: {}, days: {}, changes: {}, lineBars: [{ owner: "Solo", start: 6, len: 8 }], sheetPlan: { hours: {}, line: [], readAt: "x" } };
+const lineDay = intercomPlan({ updatedAt: "x", calendar: lineCal }, "2026-11-17", 1, Date.parse("2026-11-16T10:00:00Z"), { live: null, emails: [] }).days[0];
+check("Support Line: a stretch with nobody on the line is a need, worded for leads (the person's own break, and the hours nobody is scheduled)", lineDay.needsCover.some(n => n.kind === "line" && /^Support Line has nobody .+–.+\. Adjust breaks or add cover\.$/.test(n.text)));
 check("late-shift cover by someone who works an anchor shift: the anchor they leave is covered by the lead's pick, named with its times", texts("2026-11-23").includes("Zarminay is covering Osaid on the 5pm–2am VIP shift.") && !cv("2026-11-23").needsCover.some(n => /Osaid/.test(n.text)) && texts("2026-11-23").includes("Osaid is covering the VIP late shift 10:30pm–7:30am."));
 check("...and until a lead picks someone it is an open need, worded like the calendar's alert", cv("2026-11-25").needsCover.some(n => n.kind === "anchor" && n.text === "Anchor shift 5pm–2am VIP is uncovered. Osaid is covering the late shift."));
 check("a late-shift cover who does not work an anchor shift leaves nothing open (Ivan on 17 Nov)", !cv("2026-11-17").needsCover.some(n => /covering the late shift/.test(n.text)));
