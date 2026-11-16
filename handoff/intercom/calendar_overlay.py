@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
-"""Calendar overlay for the Phase 1 / VIP rotation (drop this file next to rotation.py).
+"""Sheet baseline + calendar changes for the Phase 1 / VIP moves (drop this file next to rotation.py).
 
-The Shift Plan calendar tells the automation where a LEAD changed something. The automation still reads the sheet for the rotation itself,
-and it stays the only thing that writes to Intercom. Everything here is a pure function (no Intercom, no Slack, no file access) except
-`fetch_plan`, which makes one read-only HTTP call. Standard library only.
+Two inputs, one rule. The INTENDED state is the sheet's (the Actual Cover column the automation already reads live: who is on Phase 1
+for the block, everybody else in VIP). On top of it come the calendar's CHANGES (a lead moved someone between Phase 1 and VIP, a Phase 1
+queue cover, a Saturday that names people). The calendar wins wherever it says something. The automation runs every hour and acts on what
+CHANGED since its last run, so a lead's edit made today is applied at the next hourly run, the next day follows at 15:00 PKT, the next
+rotation block on its Monday, and the Monday check brings everybody in line. The automation stays the only thing that writes to Intercom.
+
+Everything here is a pure function (no Intercom, no Slack, no file access) except `fetch_plan`, which makes one read-only HTTP call.
+Standard library only.
 
 Vocabulary
   shift day   named by the date it starts on; runs from 15:00 PKT that day to 15:00 PKT the next day.
-  kind        "weekday" (rotation applies), "saturday" (no rotation), "sunday" (closed: hold, change nothing).
-              On a Saturday nobody moves unless the Weekend Cover sheet names them: those it names as VIP or Phase 1 are decisions with
-              that queue (the rotation person goes to VIP only if named as a VIP rep, otherwise stays on Phase 1).
-  decision    a person whose queue on that shift day differs from normal: {"name", "email", "queue", "reason", "lead"}.
+  kind        "weekday", "saturday" (no rotation: nobody moves unless the Weekend Cover names them) or "sunday" (closed: hold).
+  decision    a person whose queue that shift day differs from normal in the calendar: {"name", "email", "queue", "reason", "lead"}.
               queue is "phase1", "vip" or "both" (in both teams).
-  overlay     the decisions as {intercom_id: queue}, after names are mapped to Intercom IDs and checked against emails.
+  baseline    {intercom_id: queue} from the sheet, for the rotation people.
+  moves       the calendar's decisions as {intercom_id: queue}, after names are mapped to Intercom IDs and checked against emails.
+  desired     what the automation wants for each person today: moves over baseline.
 
-The one rule that keeps this safe: if anything about the calendar is wrong or unreachable, `fetch_plan` / `parse_plan` raise CalendarError
-and the caller carries on with the sheet alone, exactly as it does today.
+The one rule that keeps this safe: if the calendar cannot be read or does not make sense, `fetch_plan` / `parse_plan` raise CalendarError and
+the caller carries on with the sheet alone, exactly as it did before the calendar existed.
 """
 import json
 import time
@@ -94,6 +99,9 @@ def parse_plan(text, day, days=1):
             raise CalendarError("calendar plan has a malformed day")
         if not isinstance(e.get("decisions"), list):
             raise CalendarError(f"calendar plan day {e.get('date')} has no decisions list")
+        q = e.get("queues")
+        if q is not None and (not isinstance(q, dict) or any(v not in QUEUES + ("lead",) for v in q.values())):
+            raise CalendarError(f"calendar plan day {e['date']} has malformed queues")
         for d in e["decisions"]:
             if not isinstance(d, dict) or not isinstance(d.get("name"), str) or d.get("queue") not in QUEUES + ("lead",):
                 raise CalendarError(f"calendar plan day {e['date']} has a malformed decision: {d!r}")
@@ -191,32 +199,87 @@ def apply_overlay(p1, vip, overlay):
     return p1, vip
 
 
-def revert_targets(previous, overlay, plan, exclude=()):
-    """People the previous run's overlay moved that today's overlay no longer moves, with the queue they go back to.
-    -> {intercom_id: queue}. `previous` is the marker saved last time (state["calendar"]); it remembers who was moved and their names.
-    Pass the rotation people (the ids in rotation.py's `people`) as `exclude`: the normal baseline puts them right (the person on
-    Phase 1 for the block goes back to Phase 1, everybody else to VIP), and the calendar's `normalQueue` must not override that.
-    The queue is the calendar's `normalQueue` for that person."""
+def reasons(entry):
+    """{calendar name: why the calendar moved them} for a day's decisions, for the Slack message."""
+    return {d["name"]: d.get("reason", "") for d in entry.get("decisions", [])}
+
+
+# --------------------------------------------------------------------------- the hourly decision
+
+def sheet_baseline(rotation_ids, person_id):
+    """What the sheet intends for the rotation people: the block's Phase 1 person on Phase 1, everybody else in VIP.
+    `rotation_ids` = the IDs in rotation.py's `people`; `person_id` = the Phase 1 person's ID (None: nobody)."""
+    return {str(i): ("phase1" if person_id is not None and str(i) == str(person_id) else "vip") for i in rotation_ids}
+
+
+def desired_state(baseline, moves, last_names, plan):
+    """-> {intercom_id: queue}. Precedence: the calendar's moves, then the sheet's baseline, then (for people the calendar moved on an
+    earlier run and no longer does, who the baseline does not cover) their normal queue from the calendar's roster, so they go back."""
     normal = {p["name"].lower(): p.get("normalQueue") for p in plan["roster"] if isinstance(p, dict) and "name" in p}
-    names = (previous or {}).get("names") or {}
-    skip = {str(i) for i in exclude}
-    back = {}
-    for who in (previous or {}).get("overlay") or {}:
-        if who in overlay or who in skip:
-            continue
-        q = normal.get(str(names.get(who, "")).lower())
+    desired = {}
+    for who, name in (last_names or {}).items():
+        q = normal.get(str(name).lower())
         if q in QUEUES:
-            back[who] = q
-    return back
+            desired[who] = q
+    desired.update(baseline)
+    desired.update(moves)
+    return desired
 
 
-def state_marker(entry, overlay, names=None):
-    """What to remember after a run: the overlay and the names behind the IDs. The rotation must run again exactly when this changes
-    (a lead edit, a Saturday that names the rotation person, the Monday after it that no longer does), and NOT when only the date
-    changes: a quiet day after a quiet day must not re-baseline the rotation people, or a manual /phase change to one of them would be
-    undone at the next 3pm instead of lasting until the Monday check. `entry` is accepted only so callers keep one signature."""
-    return {"overlay": dict(sorted(overlay.items())),
-            "names": {k: v for k, v in sorted((names or {}).items()) if k in overlay}}
+def pending_targets(desired, last, reset=False):
+    """Who to act on this run. The automation acts on CHANGES in what it wants, so a manual /phase change lasts until what the sheet or the
+    calendar wants for that person next changes (or the weekly check). On a reset (the Monday check, --force) and on the very first run
+    (`last` is None) everybody is brought in line. `last` is the "desired" stored by the previous run."""
+    if reset or last is None:
+        return dict(desired)
+    return {who: q for who, q in desired.items() if last.get(who) != q}
+
+
+def run_plan(plan, entry, name_ids, state, p1, vip, baseline, reset=False, apply_to_leads=False, admins=None, require_email=True,
+             max_changes=8):
+    """The whole decision for one hourly run, as a pure function (no Intercom, no state writes).
+
+    `state` is what the previous run stored (None the first time): {"desired": {id: queue}, "names": {id: name}}.
+    `p1` / `vip` are the current Intercom memberships (lists of ID strings), `baseline` is `sheet_baseline(...)`.
+    Returns a dict:
+      hold      True on a Sunday: change nothing and do not touch the state
+      desired   what is wanted today          targets  the part of it to act on now
+      p1, vip   the two team lists after the moves (the caller writes additions before removals, as rotation.py already does)
+      changed   IDs whose membership actually differs from now
+      problems  people skipped (email mismatch, unknown name, lead...)       moves   the calendar's moves today
+      new_state what to store after a successful, verified write
+    Raises CalendarError if more than `max_changes` people would move (a mistake is more likely than a real mass change)."""
+    if entry["kind"] == "sunday":
+        return {"hold": True, "desired": {}, "targets": {}, "p1": list(p1), "vip": list(vip), "changed": [], "problems": [], "moves": {},
+                "new_state": state}
+    moves, problems, names = overlay_for(entry, name_ids, apply_to_leads, admins, require_email)
+    state = state or {}
+    desired = desired_state(baseline, moves, state.get("names"), plan)
+    last = state.get("desired")
+    targets = pending_targets(desired, last, reset)
+    new_p1, new_vip = apply_overlay(p1, vip, targets)
+    changed = sorted({i for i in set(p1) | set(vip) | set(new_p1) | set(new_vip) if (i in p1, i in vip) != (i in new_p1, i in new_vip)})
+    if len(changed) > max_changes:
+        raise CalendarError(f"{len(changed)} people would move at once (limit {max_changes}); not applying it")
+    return {"hold": False, "desired": desired, "targets": targets, "p1": new_p1, "vip": new_vip, "changed": changed, "problems": problems,
+            "moves": moves, "new_state": {"desired": {**(last or {}), **desired}, "names": names}}
+
+
+def cross_check(entry, desired, id_names):
+    """Shadow-mode check: where the calendar says each person is (its `queues`) against what the automation wants. -> [text].
+    A difference means the sheet and the calendar disagree about someone (or the sheet changed between the two reads): look at it, do not
+    act on it. `id_names` = {intercom_id: calendar name}."""
+    queues = entry.get("queues")
+    if queues is None:
+        return []
+    by_name = {n.lower(): q for n, q in queues.items()}
+    out = []
+    for who, q in sorted(desired.items()):
+        name = id_names.get(who, "")
+        theirs = by_name.get(name.lower())
+        if theirs and theirs != q:
+            out.append(f"{entry['date']}: {name}: the automation wants {q} but the calendar has {theirs}")
+    return out
 
 
 def source_notes(plan):

@@ -295,6 +295,11 @@ check("the lead flag is carried on a decision", sat.decisions.find(d => d.name =
 check("emails: written on the roster entry, else the one allowed email that contains the name, else null", apiBody.roster.find(p => p.name === "Ayeshah").email === "ayeshah@autoleap.com" && apiBody.roster.find(p => p.name === "Cat").email === "cat@example.com" && apiBody.roster.find(p => p.name === "Raza").email === null);
 check("a decision carries the person's email", tue.decisions[0].email === null && sat.decisions.every(d => "email" in d));
 check("the answer says the sheet data came from the stored copy when the sheet cannot be read", apiBody.sources.weekendCover === "stored" && apiBody.sources.rotation === "stored");
+check("queues: the whole intended state per person (rotation person on Phase 1, the lead's move, the rest normal)", JSON.stringify(dayOf("2026-11-16").queues) === JSON.stringify({ Raza: "phase1", Ivan: "vip", Ammana: "vip", Osaid: "vip", Ayeshah: "phase1", Cat: "vip" }) && dayOf("2026-11-17").queues.Ivan === "phase1" && dayOf("2026-11-17").queues.Raza === "phase1" && dayOf("2026-11-18").queues.Ammana === "phase1");
+check("queues on a Saturday: named VIPs go to VIP, the rotation person stays on Phase 1 unless named, the named Phase 1 person goes to Phase 1", dayOf("2026-11-21").queues.Raza === "vip" && dayOf("2026-11-21").queues.Ivan === "phase1" && dayOf("2026-11-21").queues.Ayeshah === "phase1" && dayOf("2026-11-21").queues.Ammana === "vip");
+const sat28 = (await (await keyed("/api/v1/intercom-plan?from=2026-11-28&days=1", "key-for-intercom-123")).json()).days[0];
+check("queues on a Saturday that does not name the rotation person: they stay on Phase 1", sat28.queues.Raza === "phase1" && sat28.queues.Ivan === "vip");
+check("queues is null on a Sunday (closed: hold)", dayOf("2026-11-22").queues === null);
 check("the key never appears in an answer", !JSON.stringify(apiBody).includes("key-for"));
 const apiLog = (await (await get("/api/log", boss.session)).json()).log.filter(e => e.event === "api refused");
 check("refused API calls are logged once, without the key", apiLog.length === 1 && !JSON.stringify(apiLog).includes("nope"));

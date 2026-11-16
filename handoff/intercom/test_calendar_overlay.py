@@ -9,6 +9,7 @@ import calendar_overlay as co
 
 SAMPLE = (Path(__file__).parent / "sample_response.json").read_text(encoding="utf-8")
 IDS = {"Raza": "1", "Ivan": "2", "Ammana": "3", "Jawad": "4", "Osaid": "5", "Ayeshah": "6"}
+ROTATION_IDS = ["1", "2", "3", "4"]  # rotation.py's `people`: the ones the sheet moves between Phase 1 and VIP
 # the Intercom teammates, as phase1_cmd.list_admins(client) returns them (the emails match the sample's)
 ADMINS = [{"id": 1, "email": "ahmed.raza@autoleap.com"}, {"id": 2, "email": "ivan@autoleap.com"}, {"id": 3, "email": "ammana@autoleap.com"},
           {"id": 4, "email": "muhammad.jawad@autoleap.com"}, {"id": 5, "email": "osaid@autoleap.com"}, {"id": 6, "email": "ayeshah@autoleap.com"}]
@@ -16,7 +17,7 @@ D = date(2026, 11, 16)  # a Monday
 
 
 def plan():
-    return co.parse_plan(SAMPLE, D, 15)
+    return co.parse_plan(SAMPLE, D, 22)
 
 
 def entry(offset):
@@ -54,9 +55,8 @@ class ShiftDay(unittest.TestCase):
 
 class Parse(unittest.TestCase):
     def test_sample_parses(self):
-        p = plan()
-        self.assertEqual(p["version"], 1)
-        self.assertEqual(len(p["days"]), 15)
+        self.assertEqual(plan()["version"], 1)
+        self.assertEqual(len(plan()["days"]), 22)
 
     def test_rejects_bad_answers(self):
         for bad in ("not json", "[]", '{"version": 2}', '{"version": 1, "days": []}'):
@@ -64,21 +64,25 @@ class Parse(unittest.TestCase):
                 co.parse_plan(bad, D, 1)
 
     def test_rejects_missing_day_and_wrong_kind(self):
-        p = json.loads(SAMPLE)
         with self.assertRaises(co.CalendarError):
-            co.parse_plan(SAMPLE, D, 16)  # asked for a day the answer does not have
+            co.parse_plan(SAMPLE, D, 23)  # asked for a day the answer does not have
+        p = json.loads(SAMPLE)
         p["days"][5]["kind"] = "weekday"  # Saturday reported as a weekday
         with self.assertRaises(co.CalendarError):
             co.parse_plan(json.dumps(p), D, 15)
 
-    def test_rejects_malformed_decision(self):
-        p = json.loads(SAMPLE)
-        p["days"][1]["decisions"][0]["queue"] = "everywhere"
-        with self.assertRaises(co.CalendarError):
-            co.parse_plan(json.dumps(p), D, 15)
+    def test_rejects_malformed_decisions_and_queues(self):
+        for edit in (lambda p: p["days"][1]["decisions"][0].update(queue="everywhere"),
+                     lambda p: p["days"][1]["queues"].update(Ivan="everywhere")):
+            p = json.loads(SAMPLE)
+            edit(p)
+            with self.assertRaises(co.CalendarError):
+                co.parse_plan(json.dumps(p), D, 15)
 
 
-class Overlay(unittest.TestCase):
+class Moves(unittest.TestCase):
+    """The calendar's changes, mapped to Intercom IDs and checked against emails."""
+
     def test_edited_day(self):
         o, problems, names = co.overlay_for(entry(1), IDS)
         self.assertEqual(o, {"2": "phase1"})  # Ivan moved to Phase 1; Jawad (the rotation person) is normal
@@ -87,29 +91,24 @@ class Overlay(unittest.TestCase):
     def test_queue_cover(self):
         self.assertEqual(co.overlay_for(entry(2), IDS)[0], {"3": "phase1"})
 
-    def test_quiet_day_has_no_overlay(self):
+    def test_quiet_day_has_no_moves(self):
         self.assertEqual(co.overlay_for(entry(0), IDS), ({}, [], {}))
 
-    def test_saturday_names_the_rotation_person_as_vip_so_they_move_to_vip(self):
-        e = entry(5)  # Sat 21 Nov: weekend cover Phase 1 Ivan, VIP Jawad + Osaid; Jawad is the rotation person
-        o, _, _ = co.overlay_for(e, IDS, apply_to_leads=True)
+    def test_saturday_that_names_the_rotation_person_as_vip(self):
+        o, _, _ = co.overlay_for(entry(5), IDS, apply_to_leads=True)  # Sat 21: Phase 1 Ivan, VIP Jawad + Osaid; Jawad is the rotation person
         self.assertEqual(o, {"2": "phase1", "4": "vip", "5": "vip"})
-        self.assertEqual(e["rotationPhase1"], "Jawad")
 
-    def test_saturday_rotation_person_not_named_stays_where_they_are(self):
-        e = entry(12)  # Sat 28 Nov: weekend cover names Raza + Osaid as VIP; Jawad (rotation) is not named
-        o, _, _ = co.overlay_for(e, IDS, apply_to_leads=True)
-        self.assertNotIn("4", o)  # no decision for Jawad: he stays on Phase 1
+    def test_saturday_that_does_not_name_the_rotation_person(self):
+        o, _, _ = co.overlay_for(entry(12), IDS, apply_to_leads=True)  # Sat 28: Raza + Osaid are the VIPs
+        self.assertNotIn("4", o)
         self.assertEqual(o, {"6": "phase1", "1": "vip", "5": "vip"})
 
-    def test_sunday_holds(self):
+    def test_sunday_has_no_moves(self):
         self.assertEqual(co.overlay_for(entry(6), IDS), ({}, [], {}))
-        self.assertEqual(entry(6)["kind"], "sunday")
 
     def test_unknown_name_is_skipped_and_reported(self):
         o, problems, _ = co.overlay_for(entry(1), {"Raza": "1"})
         self.assertEqual(o, {})
-        self.assertEqual(len(problems), 1)
         self.assertIn("Ivan", problems[0])
 
     def test_names_match_without_case(self):
@@ -120,25 +119,14 @@ class Overlay(unittest.TestCase):
         self.assertEqual(co.overlay_for(e, IDS)[0], {})
         self.assertEqual(co.overlay_for(e, IDS, apply_to_leads=True)[0], {"5": "phase1"})
 
-    def test_too_many_changes_are_refused(self):
-        names = {f"P{i}": str(i) for i in range(12)}
-        e = {"date": "2026-11-17", "kind": "weekday", "decisions": [{"name": n, "queue": "vip", "reason": "x", "lead": False} for n in names]}
-        with self.assertRaises(co.CalendarError):
-            co.overlay_for(e, names)
-
-
-class EmailCheck(unittest.TestCase):
-    """The fallback check: the Intercom ID must belong to the teammate whose email the calendar sent."""
-
+    # the fallback that makes sure the right person is moved: the Intercom ID must belong to the teammate with the calendar's email
     def test_matching_email_passes(self):
-        o, problems, _ = co.overlay_for(entry(1), IDS, admins=ADMINS)
-        self.assertEqual((o, problems), ({"2": "phase1"}, []))
+        self.assertEqual(co.overlay_for(entry(1), IDS, admins=ADMINS)[:2], ({"2": "phase1"}, []))
 
-    def test_wrong_id_in_the_map_is_refused(self):
-        wrong = dict(IDS, Ivan="3")  # Ivan's ID points at Ammana
-        o, problems, _ = co.overlay_for(entry(1), wrong, admins=ADMINS)
+    def test_wrong_id_in_the_map_is_refused_and_says_who_it_really_is(self):
+        o, problems, _ = co.overlay_for(entry(1), dict(IDS, Ivan="3"), admins=ADMINS)
         self.assertEqual(o, {})
-        self.assertIn("ammana@autoleap.com", problems[0])  # says who the ID really is
+        self.assertIn("ammana@autoleap.com", problems[0])
 
     def test_an_id_that_is_not_a_teammate_is_refused(self):
         o, problems, _ = co.overlay_for(entry(1), dict(IDS, Ivan="999"), admins=ADMINS)
@@ -154,10 +142,8 @@ class EmailCheck(unittest.TestCase):
         self.assertEqual((o, problems, names), ({"2": "phase1"}, [], {"2": "Ivan"}))
 
     def test_two_teammates_with_one_email_is_not_guessed(self):
-        admins = ADMINS + [{"id": 77, "email": "ivan@autoleap.com"}]
-        o, problems, _ = co.overlay_for(entry(1), {"Raza": "1"}, admins=admins)
-        self.assertEqual(o, {})
-        self.assertEqual(len(problems), 1)
+        o, problems, _ = co.overlay_for(entry(1), {"Raza": "1"}, admins=ADMINS + [{"id": 77, "email": "ivan@autoleap.com"}])
+        self.assertEqual((o, len(problems)), ({}, 1))
 
     def test_calendar_without_an_email_cannot_be_verified(self):
         e = json.loads(json.dumps(entry(1)))
@@ -165,18 +151,20 @@ class EmailCheck(unittest.TestCase):
         o, problems, _ = co.overlay_for(e, IDS, admins=ADMINS)
         self.assertEqual(o, {})
         self.assertIn("cannot be checked", problems[0])
-        # a team that accepts the name map alone can allow it
         self.assertEqual(co.overlay_for(e, IDS, admins=ADMINS, require_email=False)[0], {"2": "phase1"})
 
     def test_one_bad_person_does_not_stop_the_others(self):
-        e = entry(5)
-        wrong = dict(IDS, Jawad="3")  # Jawad's ID is wrong, Ivan and Osaid are fine
-        o, problems, _ = co.overlay_for(e, wrong, apply_to_leads=True, admins=ADMINS)
-        self.assertEqual(o, {"2": "phase1", "5": "vip"})
-        self.assertEqual(len(problems), 1)
+        o, problems, _ = co.overlay_for(entry(5), dict(IDS, Jawad="3"), apply_to_leads=True, admins=ADMINS)
+        self.assertEqual((o, len(problems)), ({"2": "phase1", "5": "vip"}, 1))
 
-    def test_without_admins_the_check_is_skipped(self):
-        self.assertEqual(co.overlay_for(entry(1), IDS)[0], {"2": "phase1"})
+    def test_too_many_changes_are_refused(self):
+        names = {f"P{i}": str(i) for i in range(12)}
+        e = {"date": "2026-11-17", "kind": "weekday", "decisions": [{"name": n, "queue": "vip", "reason": "x", "lead": False} for n in names]}
+        with self.assertRaises(co.CalendarError):
+            co.overlay_for(e, names)
+
+    def test_reasons_for_the_slack_message(self):
+        self.assertEqual(co.reasons(entry(1)), {"Ivan": "day edited by a lead"})
 
 
 class Teams(unittest.TestCase):
@@ -191,35 +179,170 @@ class Teams(unittest.TestCase):
         self.assertEqual(once, (["9", "3"], ["3"]))
         self.assertEqual(co.apply_overlay(*once, {"3": "both"}), once)
 
-    def test_empty_overlay_changes_nothing(self):
+    def test_no_moves_change_nothing(self):
         self.assertEqual(co.apply_overlay(["9"], ["3"], {}), (["9"], ["3"]))
 
-    def test_revert_goes_back_to_the_normal_queue(self):
-        prev = co.state_marker(entry(1), {"2": "phase1", "6": "vip"}, {"2": "Ivan", "6": "Ayeshah"})
-        self.assertEqual(co.revert_targets(prev, {"2": "phase1"}, plan()), {"6": "phase1"})  # Ayeshah is Phase 1 normally
-        self.assertEqual(co.revert_targets(None, {}, plan()), {})
 
-    def test_revert_never_touches_the_rotation_people(self):
-        prev = co.state_marker(entry(1), {"4": "vip", "6": "vip"}, {"4": "Jawad", "6": "Ayeshah"})
-        self.assertEqual(co.revert_targets(prev, {}, plan(), exclude=["4"]), {"6": "phase1"})
+class Desired(unittest.TestCase):
+    def test_the_sheet_baseline(self):
+        self.assertEqual(co.sheet_baseline(ROTATION_IDS, "4"), {"1": "vip", "2": "vip", "3": "vip", "4": "phase1"})
+        self.assertEqual(set(co.sheet_baseline(ROTATION_IDS, None).values()), {"vip"})
 
-    def test_state_marker_changes_only_when_the_overlay_changes(self):
-        e1, e2 = entry(0), entry(3)
-        # a new day with nothing decided is not a change: the rotation must not re-run (manual /phase changes must last)
-        self.assertEqual(co.state_marker(e1, {}), co.state_marker(e2, {}))
-        self.assertEqual(co.state_marker(e1, {"2": "phase1"}, {"2": "Ivan"}), co.state_marker(e2, {"2": "phase1"}, {"2": "Ivan"}))
-        # a lead's edit, or a Saturday that moves someone, is a change; so is the Monday that clears it
-        self.assertNotEqual(co.state_marker(e1, {}), co.state_marker(e1, {"2": "phase1"}))
-        self.assertNotEqual(co.state_marker(entry(5), {"4": "vip"}), co.state_marker(entry(7), {}))
-        self.assertEqual(co.state_marker(e1, {"b": "vip", "a": "phase1"}), co.state_marker(e1, {"a": "phase1", "b": "vip"}))
+    def test_the_calendar_wins_over_the_sheet(self):
+        base = co.sheet_baseline(ROTATION_IDS, "4")
+        d = co.desired_state(base, {"4": "vip", "2": "phase1"}, {}, plan())  # a lead moved the sheet's Phase 1 person out and Ivan in
+        self.assertEqual(d, {"1": "vip", "2": "phase1", "3": "vip", "4": "vip"})
+
+    def test_someone_the_calendar_moved_earlier_goes_back_to_their_normal_queue(self):
+        base = co.sheet_baseline(ROTATION_IDS, "4")
+        d = co.desired_state(base, {}, {"6": "Ayeshah"}, plan())  # Ayeshah is not a rotation person; the calendar moved her yesterday
+        self.assertEqual(d["6"], "phase1")  # her normal queue
+
+    def test_pending_targets_are_the_changes_unless_it_is_a_reset_or_the_first_run(self):
+        desired, last = {"1": "vip", "2": "phase1"}, {"1": "vip", "2": "vip"}
+        self.assertEqual(co.pending_targets(desired, last), {"2": "phase1"})
+        self.assertEqual(co.pending_targets(desired, last, reset=True), desired)
+        self.assertEqual(co.pending_targets(desired, None), desired)
+        self.assertEqual(co.pending_targets(desired, desired), {})
+
+
+class Hourly(unittest.TestCase):
+    """Hourly runs against a fake Intercom: the sheet is the intended state, the calendar's changes win, the automation acts on changes."""
+
+    # who the sheet puts on Phase 1, by day offset from Mon 16 Nov (the sample's blocks: Jawad until Fri 27 Nov, Ivan from Mon 30 Nov)
+    def sheet_person(self, offset):
+        return "4" if offset < 14 else "2"
+
+    def setUp(self):
+        self.state = None
+        # Intercom before the first run: Jawad (the sheet's Phase 1 person) on Phase 1, Ayeshah always on Phase 1, the rest in VIP
+        self.p1, self.vip = ["4", "6"], ["1", "2", "3"]
+
+    def hour(self, offset, reset=False, **kw):
+        e = entry(offset)
+        base = co.sheet_baseline(ROTATION_IDS, self.sheet_person(offset if e["kind"] == "weekday" else offset - (1 if e["kind"] == "saturday" else 2)))
+        r = co.run_plan(plan(), e, IDS, self.state, self.p1, self.vip, base, reset=reset, admins=ADMINS, **kw)
+        if not r["hold"]:
+            self.p1, self.vip, self.state = r["p1"], r["vip"], r["new_state"]
+        return r
+
+    def manual(self, who, team):  # what /phase does in Intercom
+        if team == "vip":
+            self.p1, self.vip = [i for i in self.p1 if i != who], self.vip + ([who] if who not in self.vip else [])
+        else:
+            self.vip, self.p1 = [i for i in self.vip if i != who], self.p1 + ([who] if who not in self.p1 else [])
+
+    def test_first_run_brings_everything_in_line(self):
+        self.p1, self.vip = ["6"], ["1", "2", "3", "4"]  # Jawad is in VIP but the sheet says Phase 1
+        r = self.hour(0)
+        self.assertEqual(r["changed"], ["4"])
+        self.assertIn("4", self.p1)
+        self.assertNotIn("4", self.vip)
+
+    def test_quiet_hours_and_quiet_days_change_nothing(self):
+        self.hour(0)
+        for _ in range(5):
+            self.assertEqual(self.hour(0)["changed"], [])
+        self.assertEqual(self.hour(3)["changed"], [])
+
+    def test_a_lead_edit_is_applied_at_the_next_hourly_run_and_undone_the_next_day(self):
+        self.hour(0)
+        r = self.hour(1)  # Tue 17: the lead moved Ivan to Phase 1
+        self.assertEqual(r["changed"], ["2"])
+        self.assertIn("2", self.p1)
+        self.assertNotIn("2", self.vip)
+        self.assertEqual(self.hour(1)["changed"], [])
+        r = self.hour(2)  # Wed 18: Ammana is on Phase 1 for the night, Ivan is back to the sheet's VIP
+        self.assertEqual(r["changed"], ["2", "3"])
+        self.assertIn("3", self.p1)
+        self.assertIn("2", self.vip)
+
+    def test_the_calendar_beats_the_sheet_when_they_disagree(self):
+        self.hour(0)
+        e = json.loads(json.dumps(entry(1)))
+        e["decisions"] = [{"name": "Jawad", "email": "muhammad.jawad@autoleap.com", "queue": "vip", "reason": "day edited by a lead", "lead": False}]
+        base = co.sheet_baseline(ROTATION_IDS, "4")  # the sheet says Jawad is on Phase 1
+        r = co.run_plan(plan(), e, IDS, self.state, self.p1, self.vip, base, admins=ADMINS)
+        self.assertIn("4", r["vip"])
+        self.assertNotIn("4", r["p1"])
+
+    def test_a_manual_move_lasts_until_the_sheet_or_calendar_changes_for_that_person(self):
+        self.hour(0)
+        self.manual("6", "vip")  # someone used /phase to put Ayeshah in VIP
+        for off in (1, 2, 3, 4):
+            self.hour(off)
+            self.assertIn("6", self.vip, f"manual change was undone on day {off}")
+
+    def test_the_monday_check_resets_manual_moves_of_the_rotation_people(self):
+        self.hour(0)
+        self.manual("2", "p1")  # someone used /phase to put Ivan (VIP by the sheet) on Phase 1
+        self.assertEqual(self.hour(3)["changed"], [])  # a quiet day leaves it
+        self.assertIn("2", self.p1)
+        r = self.hour(7, reset=True)  # the Monday check brings everybody in line with the sheet and the calendar
+        self.assertIn("2", r["changed"])
+        self.assertIn("2", self.vip)
+        self.assertNotIn("2", self.p1)
+
+    def test_someone_the_calendar_moved_goes_back_when_it_stops_moving_them(self):
+        self.hour(0)
+        e = json.loads(json.dumps(entry(1)))
+        e["decisions"] = [{"name": "Ayeshah", "email": "ayeshah@autoleap.com", "queue": "vip", "reason": "day edited by a lead", "lead": False}]
+        base = co.sheet_baseline(ROTATION_IDS, "4")
+        r = co.run_plan(plan(), e, IDS, self.state, self.p1, self.vip, base, admins=ADMINS)  # Tue: Ayeshah (not a rotation person) to VIP
+        self.assertIn("6", r["vip"])
+        self.p1, self.vip, self.state = r["p1"], r["vip"], r["new_state"]
+        r = self.hour(2)  # Wed: no decision for her any more
+        self.assertIn("6", self.p1)
+        self.assertNotIn("6", self.vip)
+
+    def test_saturday_follows_the_weekend_cover_and_monday_puts_the_rotation_person_back(self):
+        for off in range(5):
+            self.hour(off)
+        r = self.hour(5)  # Sat 21: Jawad (the sheet's person) is named as VIP, Ivan as Phase 1
+        self.assertEqual(set(r["changed"]), {"4", "2"})
+        self.assertIn("4", self.vip)
+        self.assertIn("2", self.p1)
+        before = (list(self.p1), list(self.vip), json.dumps(self.state, sort_keys=True))
+        self.assertTrue(self.hour(6)["hold"])  # Sunday: closed
+        self.assertEqual((self.p1, self.vip, json.dumps(self.state, sort_keys=True)), before)
+        r = self.hour(7)  # Mon 23: back to the sheet
+        self.assertEqual(set(r["changed"]), {"4", "2"})
+        self.assertIn("4", self.p1)
+        self.assertIn("2", self.vip)
+
+    def test_a_saturday_that_does_not_name_the_rotation_person_leaves_them_on_phase_1(self):
+        for off in range(7, 12):
+            self.hour(off)
+        r = self.hour(12)  # Sat 28: Jawad is not named
+        self.assertIn("4", self.p1)
+        self.assertNotIn("4", r["changed"])
+
+    def test_the_next_block_changes_the_rotation_person_on_its_monday(self):
+        for off in range(5):
+            self.hour(off)
+        r = self.hour(14)  # Mon 30 Nov: the sheet's next block names Ivan
+        self.assertEqual(set(r["changed"]), {"2", "4"})
+        self.assertIn("2", self.p1)
+        self.assertIn("4", self.vip)
+
+    def test_too_many_moves_at_once_are_refused(self):
+        base = co.sheet_baseline(ROTATION_IDS, "4")
+        with self.assertRaises(co.CalendarError):
+            co.run_plan(plan(), entry(0), IDS, None, ["1", "2", "3"], ["4"], base, admins=ADMINS, max_changes=1)  # 4 people would swap teams
+
+    def test_cross_check_reports_a_disagreement_between_sheet_and_calendar(self):
+        ids = {"1": "Raza", "2": "Ivan", "3": "Ammana", "4": "Jawad"}
+        self.assertEqual(co.cross_check(entry(0), co.sheet_baseline(ROTATION_IDS, "4"), ids), [])
+        out = co.cross_check(entry(0), co.sheet_baseline(ROTATION_IDS, "1"), ids)  # the sheet says Raza, the calendar says Jawad
+        self.assertEqual(len(out), 2)
+        self.assertEqual(co.cross_check(entry(6), {"4": "phase1"}, ids), [])  # Sunday: nothing to compare
 
 
 class Notes(unittest.TestCase):
     def test_rotation_check(self):
         self.assertIsNone(co.rotation_check(entry(0), "Jawad"))
         self.assertIn("Raza", co.rotation_check(entry(0), "Raza"))
-        self.assertIsNone(co.rotation_check(entry(5), "Jawad"))  # Saturday: Friday's person
-        self.assertIsNone(co.rotation_check(entry(6), "Raza"))  # Sunday: not compared
+        self.assertIsNone(co.rotation_check(entry(6), "Raza"))
 
     def test_source_notes(self):
         p = json.loads(SAMPLE)

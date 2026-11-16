@@ -79,14 +79,15 @@ export function emailFor(person, emails) {
   return hits.length === 1 ? String(hits[0]).toLowerCase() : null;
 }
 
-// One shift day: kind, what the calendar thinks the rotation is, and the decisions (people whose queue differs from normal).
+// One shift day: kind, what the calendar thinks the rotation is, the decisions (people whose queue differs from normal) and `queues`
+// (everyone's queue that day; null on a Sunday, which is closed).
 // `live` = { weekends: Map date -> { phase1, vip[] } | null, blocks: [...] | null } from the sheet (null: use the stored copy); `emails` = allowed emails.
 export function dayPlan(cal, key, live, emails) {
   live = live || {};
   const dow = weekdayOf(key);
-  const out = { date: key, weekday: WEEKDAYS[dow], kind: dow === 0 ? "sunday" : dow === 6 ? "saturday" : "weekday", rotationPhase1: null, edited: false, decisions: [] };
+  const out = { date: key, weekday: WEEKDAYS[dow], kind: dow === 0 ? "sunday" : dow === 6 ? "saturday" : "weekday", rotationPhase1: null, edited: false, decisions: [], queues: {} };
   out.boundary = key + "T15:00:00+05:00";
-  if (out.kind === "sunday") return out; // closed: nothing is decided, the automation holds what it has
+  if (out.kind === "sunday") { out.queues = null; return out; } // closed: nothing is decided and nothing is intended, the automation holds what it has
   const roster = Array.isArray(cal.people) ? cal.people : [];
   const rosterQ = new Map(roster.map(p => [p.name, personQueue(p)]));
   const blocks = live.blocks || (cal.vipPlan && cal.vipPlan.blocks) || [];
@@ -126,6 +127,10 @@ export function dayPlan(cal, key, live, emails) {
     out.decisions.push({ name: p.name, email: emailFor(p, emails), queue: d.queue, reason: d.reason, lead: isLead(p) });
   });
   out.decisions.sort((a, b) => a.name.localeCompare(b.name));
+  // The whole intended state for the day: every roster person's queue (phase1, vip, both or lead). On a weekday the rotation person is on
+  // Phase 1; on a Saturday they stay on Phase 1 unless the Weekend Cover names them as VIP; decisions win over both.
+  const base = name => (out.kind === "saturday" ? (rotation && name === rotation ? "phase1" : rosterQ.get(name)) : normal(name));
+  roster.forEach(p => { const d = decided.get(p.name); out.queues[p.name] = d ? d.queue : base(p.name); });
   return out;
 }
 
