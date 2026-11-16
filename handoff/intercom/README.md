@@ -204,7 +204,7 @@ A message once per shift day, listing what the calendar knows about cover. Every
 - If a day carries `coversError` (the calendar could not work out its cover list; the queue answer is still fine) `co.cover_digest` returns None; log `co.cover_error(entry)` and carry on.
 - It is independent of `mode`: it only reads the calendar, and a calendar failure just means no message that day (log it, do not retry in a loop, never block the Intercom work).
 
-One thing the message cannot say: it reports covers the calendar knows. A late-shift cover a lead adds by hand does not vacate that person's own anchor shift in the calendar (the anchor logic follows the sheet's block people), so "Raza covers the late shift, so who covers his 6pm?" only appears if the sheet's Anchor Cover columns say so.
+Anchor shifts: when a lead puts someone who works an anchor shift (for example Raza, 6pm–3am) on late-shift cover, the calendar treats the anchor they leave as open for that night. It shows up in `needsCover` ("Anchor shift 6pm–3am VIP is uncovered. Raza is covering the late shift.") until a lead picks a VIP rep in the calendar, and then as a cover ("Zarminay is covering Raza on the 6pm–3am VIP shift."). So the two-step story (Raza covers the late shift, Zarminay covers Raza's 6pm) is in the message as two lines once both are entered.
 
 ### 3.7 If the calendar is unavailable (the must-not-fail rule)
 

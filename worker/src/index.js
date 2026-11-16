@@ -208,6 +208,14 @@ function planChanges(prev, next) {
       else if (!b) out.push("Removed " + kinds[k] + " " + a + " for " + dayLabel(date));
       else out.push("Changed " + kinds[k] + " for " + dayLabel(date) + " from " + a + " to " + b);
     });
+    // the VIP rep a lead put on the anchor shift a late-shift cover person left
+    const pa = (pc[date] || {}).anchor || {}, na = (nc[date] || {}).anchor || {};
+    [...new Set([...Object.keys(pa), ...Object.keys(na)])].sort().forEach(who => {
+      if (pa[who] === na[who]) return;
+      if (!pa[who]) out.push("Added anchor shift cover " + na[who] + " for " + who + " on " + dayLabel(date));
+      else if (!na[who]) out.push("Removed anchor shift cover " + pa[who] + " for " + who + " on " + dayLabel(date));
+      else out.push("Changed anchor shift cover for " + who + " on " + dayLabel(date) + " from " + pa[who] + " to " + na[who]);
+    });
   });
   // a day edited by hand (Saturdays are rebuilt from the sheet, so a new Saturday entry is not an edit)
   const pd = prev.days || {}, nd = next.days || {};

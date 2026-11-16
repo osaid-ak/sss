@@ -193,30 +193,39 @@ export function makeEngine(cal, live, nowMs) {
       }
     });
   }
-  // When the block's Late Shift or Phase 1 person normally works an anchor shift, that anchor is vacated for the block.
+  // When the block's Late Shift or Phase 1 person normally works an anchor shift, that anchor is vacated for the block. The same happens for
+  // one night when a lead puts someone who works an anchor shift on late-shift cover (kind "cover"): the anchor they leave needs a holder.
   function anchorGaps(key) {
     if (isSunday(key) || isSaturday(key) || days[key]) return [];
     const blk = vipBlockFor(key);
-    if (!blk) return [];
+    const cov = lateCoverFor(key);
+    if (!blk && !cov) return [];
     const base = clone(roster);
     applySheetPlan(base, [], key);
     const off = dstSlots(key);
     const gaps = [];
-    [["late", blk.late], ["phase1", blk.phase1]].forEach(([kind, name]) => {
+    const add = (kind, name, block) => {
       const p = name && base.find(x => x.name === name);
-      if (!p) return;
+      if (!p || gaps.some(g => g.person === name)) return;
       const a = ANCHORS.find(x => x.start === p.start && x.len === p.len);
-      if (a) gaps.push({ kind, person: name, start: a.start + off, len: a.len, brk: p.brk - p.start, block: blk.start });
-    });
+      if (a) gaps.push({ kind, person: name, start: a.start + off, len: a.len, brk: p.brk - p.start, block });
+    };
+    if (blk) [["late", blk.late], ["phase1", blk.phase1]].forEach(([kind, name]) => add(kind, name, blk.start));
+    if (cov) [cov.vip, cov.phase1].forEach(name => add("cover", name, key));
     return gaps;
   }
   function anchorCoverFor(key) {
     const b = vipBlockFor(key);
     return { late: (b && b.cover1) || "", phase1: (b && b.cover2) || "" };
   }
+  // Who holds a vacated anchor shift: the sheet's Anchor Cover for the block people, or the cover a lead picked for a late-shift cover person.
+  function gapCover(key, g) {
+    if (g.kind === "cover") return ((lateCoverFor(key) || {}).anchor || {})[g.person] || "";
+    return anchorCoverFor(key)[g.kind];
+  }
   function applyAnchorCover(people, key) {
     anchorGaps(key).forEach(g => {
-      const name = anchorCoverFor(key)[g.kind];
+      const name = gapCover(key, g);
       const p = name && people.find(x => x.name === name);
       if (!p) return;
       p.split = null;
@@ -359,7 +368,7 @@ export function makeEngine(cal, live, nowMs) {
       out.push({ name: c.p1q, kind: "queue", for: blk.phase1 || "", what: "Phase 1", lo: who ? who.start : null, hi: who ? who.start + who.len : null });
     }
     anchorGaps(key).forEach(g => {
-      const name = anchorCoverFor(key)[g.kind];
+      const name = gapCover(key, g);
       if (name && day.people.some(x => x.name === name)) {
         out.push({ name, kind: "anchor", for: g.person, what: "the " + span(g.start, g.len) + " VIP shift", lo: g.start, hi: g.start + g.len });
       }
@@ -417,7 +426,11 @@ export function makeEngine(cal, live, nowMs) {
       out.push({ kind: "late", text: "Late shift " + range + " needs a " + kindName[kind] + " person." + who });
     });
     anchorGaps(key).forEach(g => {
-      if (anchorCoverFor(key)[g.kind]) return;
+      if (gapCover(key, g)) return;
+      if (g.kind === "cover") {
+        out.push({ kind: "anchor", text: "Anchor shift " + span(g.start, g.len) + " VIP is uncovered. " + g.person + " is covering the late shift." });
+        return;
+      }
       const role = g.kind === "late" ? "Late Shift" : "Phase 1";
       out.push({ kind: "anchor", text: "Anchor shift " + span(g.start, g.len) + " VIP is uncovered. " + g.person + " is on " + role + " this block. Add a VIP rep under Anchor " + (g.kind === "late" ? "1" : "2") + " on the VIP Coverage Plan sheet." });
     });

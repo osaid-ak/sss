@@ -342,17 +342,19 @@ const coverCal = {
   people: [CP("Ammana"), CP("Raza", { start: 4, brk: 12 }), CP("Zarminay"), CP("Ivan"), CP("Jawad", { start: 8, brk: 16 }),
     CP("Ayeshah", { roles: { phase1: true }, queue: "phase1", group: "Phase 1" }),
     CP("Qasim", { roles: { phase1: true, line: true }, queue: "phase1", group: "Phase 1" }),
-    CP("Laraib", { roles: { phase1: true, line: true }, queue: "phase1", group: "Phase 1" })],
+    CP("Laraib", { roles: { phase1: true, line: true }, queue: "phase1", group: "Phase 1" }),
+    CP("Osaid", { start: 2, brk: 10 })],
   // Raza (the 6pm-3am anchor shift) is the block's Late Shift person, so his anchor is vacated and Zarminay (Anchor Cover 1) covers it
   vipPlan: { blocks: [{ start: "2026-11-16", end: "2026-11-27", late: "Raza", phase1: "Jawad", cover1: "Zarminay", cover2: "" }], readAt: "x" },
   leaves: [{ id: "l1", name: "Ammana", start: "2026-11-17", end: "2026-11-17", status: "approved" }, { id: "l2", name: "Laraib", start: "2026-11-18", end: "2026-11-18", status: "approved" }, { id: "l3", name: "Ivan", start: "2026-11-18", end: "2026-11-18", status: "pending" }],
   holidays: [{ id: "h1", status: "confirmed", offs: { "2026-11-19": { Ivan: "off", Qasim: "pto" } } }, { id: "h2", status: "draft", offs: { "2026-11-20": { Zarminay: "off" } } }],
-  lateCover: { "2026-11-17": { vip: "Ivan", p1q: "Ayeshah" } },
+  // 23 Nov: Osaid (the 5pm-2am anchor) covers the late shift and a lead picked Zarminay for the anchor he left; 25 Nov: nobody picked yet
+  lateCover: { "2026-11-17": { vip: "Ivan", p1q: "Ayeshah" }, "2026-11-23": { vip: "Osaid", anchor: { Osaid: "Zarminay" } }, "2026-11-25": { vip: "Osaid" } },
   sheetPlan: { hours: {}, line: [{ start: "2026-11-16", end: "2026-11-27", slots: ["Laraib", "Qasim", "Ayeshah"], backup: "Ivan" }], readAt: "x" },
   days: { "2026-11-24": { people: [CP("Ammana"), CP("Zarminay")], lineBars: [] }, "2026-11-21": { people: [], lineBars: [], weekendCover: { phase1: "Ivan", vip: ["Raza", "Ammana"] } } },
   lineBars: []
 };
-const cvPlan = intercomPlan({ updatedAt: "x", calendar: coverCal }, "2026-11-16", 10, Date.parse("2026-11-16T10:00:00Z"), { live: null, emails: [] });
+const cvPlan = intercomPlan({ updatedAt: "x", calendar: coverCal }, "2026-11-16", 12, Date.parse("2026-11-16T10:00:00Z"), { live: null, emails: [] });
 const cv = d => cvPlan.days.find(x => x.date === d);
 const texts = d => cv(d).covers.map(c => c.text);
 check("away: approved leave and confirmed holiday offs count, pending leave and draft plans do not", cv("2026-11-17").away.map(a => a.name + ":" + a.kind).join() === "Ammana:pto" && cv("2026-11-18").away.map(a => a.name).join() === "Laraib" && cv("2026-11-19").away.map(a => a.name + ":" + a.kind).join() === "Ivan:off,Qasim:pto" && cv("2026-11-20").away.length === 0);
@@ -363,6 +365,9 @@ check("Phase 1 queue cover names the rotation person it replaces", texts("2026-1
 check("Support Line: the sheet's backup takes the slot of an owner who is off, and says how the shift moved", texts("2026-11-18").includes("Ivan is covering Laraib on Support Line 6pm–10pm. Ivan's shift was adjusted to 6pm–3am to cover the Support Line."));
 check("needs cover: a late shift without a Phase 1 person, an uncovered anchor, and a Support Line slot nobody can take", cv("2026-11-19").needsCover.some(n => n.kind === "late" && /needs a Phase 1 person/.test(n.text)) && cv("2026-11-19").needsCover.some(n => n.kind === "anchor" && /Anchor 2 on the VIP Coverage Plan sheet/.test(n.text)) && cv("2026-11-19").needsCover.some(n => n.kind === "line" && n.text === "Support Line 10pm–1am owner Qasim is off. Backup Ivan is off too."));
 check("the rotation people are named (Late Shift person), and a hand-edited day has no anchor cover", cv("2026-11-16").lateShift === "Raza" && !cv("2026-11-24").covers.some(c => c.kind === "anchor"));
+check("late-shift cover by someone who works an anchor shift: the anchor they leave is covered by the lead's pick, named with its times", texts("2026-11-23").includes("Zarminay is covering Osaid on the 5pm–2am VIP shift.") && !cv("2026-11-23").needsCover.some(n => /Osaid/.test(n.text)) && texts("2026-11-23").includes("Osaid is covering the VIP late shift 10:30pm–7:30am."));
+check("...and until a lead picks someone it is an open need, worded like the calendar's alert", cv("2026-11-25").needsCover.some(n => n.kind === "anchor" && n.text === "Anchor shift 5pm–2am VIP is uncovered. Osaid is covering the late shift."));
+check("a late-shift cover who does not work an anchor shift leaves nothing open (Ivan on 17 Nov)", !cv("2026-11-17").needsCover.some(n => /covering the late shift/.test(n.text)));
 check("Saturday: only the weekend names can be away, no covers; Sunday: nothing", cv("2026-11-21").covers.length === 0 && cv("2026-11-21").needsCover.length === 0 && cv("2026-11-22").covers.length === 0 && cv("2026-11-22").away.length === 0);
 check("every cover has text and times where the page has a time", cvPlan.days.every(d => d.covers.every(c => typeof c.text === "string" && c.text.endsWith(".") && (c.from ? !!c.fromAt && !!c.toAt : true))));
 const satLeave = JSON.parse(JSON.stringify(coverCal));
@@ -391,6 +396,17 @@ env.API_KEYS = "intercom:key-for-intercom-123";
 const liveTab = await (await keyed("/api/v1/intercom-plan?from=2026-11-19&days=1", "key-for-intercom-123")).json();
 check("the Phase 1 / Support Line tab is read live: a current shift that differs from the original shows as covering", liveTab.days[0].covers.some(c => c.kind === "hours" && c.name === "Ivan" && c.text === "Ivan is working 9pm–6am instead of their usual 7pm–4am." && c.from === "9pm"));
 sheetMock = () => new Response("forbidden", { status: 403 });
+// the anchor cover a lead picks for a late-shift cover person is logged with its people and date
+const logsBefore = (await (await get("/api/log", who.session)).json()).log.length;
+const anchorPlan = JSON.parse(JSON.stringify(apiCal));
+anchorPlan.lateCover = { "2026-11-23": { vip: "Raza", anchor: { Raza: "Ammana" } } };
+await putPlan(who.session, { version: 1, updatedAt: "2026-11-14T11:00:00.000Z", parts: 1, calendar: anchorPlan });
+anchorPlan.lateCover["2026-11-23"].anchor.Raza = "Ivan";
+await putPlan(who.session, { version: 1, updatedAt: "2026-11-14T11:01:00.000Z", parts: 1, calendar: anchorPlan });
+delete anchorPlan.lateCover["2026-11-23"].anchor;
+await putPlan(who.session, { version: 1, updatedAt: "2026-11-14T11:02:00.000Z", parts: 1, calendar: anchorPlan });
+const anchorLog = (await (await get("/api/log", who.session)).json()).log.map(e => e.detail || "").join(" | ");
+check("an anchor shift cover for a late-shift cover person is logged when added, changed and removed", /Added anchor shift cover Ammana for Raza on Mon 23 Nov/.test(anchorLog) && /Changed anchor shift cover for Raza on Mon 23 Nov from Ammana to Ivan/.test(anchorLog) && /Removed anchor shift cover Ivan for Raza on Mon 23 Nov/.test(anchorLog) && logsBefore > 0);
 delete env.API_KEYS;
 check("with no keys configured every call is refused", (await keyed("/api/v1/intercom-plan", "key-for-intercom-123")).status === 401);
 
