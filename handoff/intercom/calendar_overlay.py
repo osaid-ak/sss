@@ -211,9 +211,11 @@ def revert_targets(previous, overlay, plan, exclude=()):
 
 
 def state_marker(entry, overlay, names=None):
-    """What to remember after a run: the shift day, its kind, the overlay and the names behind the IDs. The rotation must run again when
-    this changes (a new day, a Saturday, a Monday after it, an edit in the calendar), not only when the sheet's block changes."""
-    return {"day": entry["date"], "kind": entry["kind"], "overlay": dict(sorted(overlay.items())),
+    """What to remember after a run: the overlay and the names behind the IDs. The rotation must run again exactly when this changes
+    (a lead edit, a Saturday that names the rotation person, the Monday after it that no longer does), and NOT when only the date
+    changes: a quiet day after a quiet day must not re-baseline the rotation people, or a manual /phase change to one of them would be
+    undone at the next 3pm instead of lasting until the Monday check. `entry` is accepted only so callers keep one signature."""
+    return {"overlay": dict(sorted(overlay.items())),
             "names": {k: v for k, v in sorted((names or {}).items()) if k in overlay}}
 
 

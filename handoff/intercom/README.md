@@ -130,7 +130,7 @@ if mode in ("shadow", "on"):
    - the state `key` stays `f"{block['n']}:{person}"`; what makes the run happen on Saturday is the overlay marker (step 4).
    - If the Weekend Cover names the rotation person as a VIP rep, the calendar sends `{"name": <them>, "queue": "vip"}` and the overlay moves them to VIP for the Saturday. If it does not name them, there is no decision and they stay on Phase 1.
 3. **Weekday**: unchanged (`active_block`, `person`, `key`), except the "already applied" test below.
-4. **"Already applied" test**. Today `state["applied"] == key and not force and not sync` returns "unchanged". With the calendar the run must also happen when the **overlay changes** (a new day, an edit in the calendar, Saturday, Monday after Saturday):
+4. **"Already applied" test**. Today `state["applied"] == key and not force and not sync` returns "unchanged". With the calendar the run must also happen when the **overlay changes** (an edit in the calendar, a Saturday that names the rotation person, the Monday that no longer does). It must **not** run just because the date changed: a quiet day after a quiet day leaves the rotation people alone, so manual `/phase` changes last until the Monday check as they do today.
 
    ```python
    marker = co.state_marker(entry, overlay, names) if (mode == "on" and overlay is not None) else None
@@ -139,7 +139,7 @@ if mode in ("shadow", "on"):
        return "unchanged"
    ```
 
-   This is also what moves the rotation person **back to Phase 1 on Monday**: Saturday's marker (`kind: saturday`, overlay with them as VIP) differs from Monday's, so the run happens even though the block number and person are the same as last Friday, and the baseline puts them back on Phase 1.
+   This is also what moves the rotation person **back to Phase 1 on Monday**: Saturday's marker (an overlay with them as VIP) differs from Monday's (empty), so the run happens even though the block number and person are the same as last Friday, and the baseline puts them back on Phase 1. If the Weekend Cover did not name them, nothing moved on Saturday and nothing needs to run on Monday.
 5. After your existing `p1_final` / `vip_final` are computed (baseline), and **before** the "Safety" check, apply the overlay:
 
    ```python

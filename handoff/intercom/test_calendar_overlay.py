@@ -203,11 +203,15 @@ class Teams(unittest.TestCase):
         prev = co.state_marker(entry(1), {"4": "vip", "6": "vip"}, {"4": "Jawad", "6": "Ayeshah"})
         self.assertEqual(co.revert_targets(prev, {}, plan(), exclude=["4"]), {"6": "phase1"})
 
-    def test_state_marker_changes_on_a_new_day_or_edit(self):
-        e1, e2 = entry(0), entry(1)
-        self.assertNotEqual(co.state_marker(e1, {}), co.state_marker(e2, {}))
-        self.assertNotEqual(co.state_marker(e2, {}), co.state_marker(e2, {"2": "phase1"}))
-        self.assertEqual(co.state_marker(e2, {"b": "vip", "a": "phase1"}), co.state_marker(e2, {"a": "phase1", "b": "vip"}))
+    def test_state_marker_changes_only_when_the_overlay_changes(self):
+        e1, e2 = entry(0), entry(3)
+        # a new day with nothing decided is not a change: the rotation must not re-run (manual /phase changes must last)
+        self.assertEqual(co.state_marker(e1, {}), co.state_marker(e2, {}))
+        self.assertEqual(co.state_marker(e1, {"2": "phase1"}, {"2": "Ivan"}), co.state_marker(e2, {"2": "phase1"}, {"2": "Ivan"}))
+        # a lead's edit, or a Saturday that moves someone, is a change; so is the Monday that clears it
+        self.assertNotEqual(co.state_marker(e1, {}), co.state_marker(e1, {"2": "phase1"}))
+        self.assertNotEqual(co.state_marker(entry(5), {"4": "vip"}), co.state_marker(entry(7), {}))
+        self.assertEqual(co.state_marker(e1, {"b": "vip", "a": "phase1"}), co.state_marker(e1, {"a": "phase1", "b": "vip"}))
 
 
 class Notes(unittest.TestCase):
