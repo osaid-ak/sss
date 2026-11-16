@@ -15,6 +15,8 @@ const SLOT_MIN = 30;
 const SLOTS = (32 * 60 - START_MIN) / SLOT_MIN;
 const VIP_LATE_START = 13;
 const VIP_LATE_LEN = 18;
+// the break on the late shift is always 2am PKT on the standard clock (1am in summer): seven half-hours after it starts
+const LATE_BRK_REL = 7;
 const BRK_LEN = 2;
 // The three Support Line slots on the summer schedule: 5-9pm, 9pm-12am, 12-3am PKT (6-10, 10-1, 1-4 in standard time).
 const LINE_SLOTS = [{ start: 4, len: 8 }, { start: 12, len: 6 }, { start: 18, len: 6 }];
@@ -148,7 +150,8 @@ export function makeEngine(cal, live, nowMs) {
     return Number.isFinite(shift.start) && Number.isFinite(shift.len) ? { start: shift.start, len: shift.len } : null;
   }
   function takeHours(p, h) {
-    const rel = Number.isFinite(p.brk) && Number.isFinite(p.start) ? p.brk - p.start : Math.floor(h.len / 2) - 1;
+    const late = h.len === VIP_LATE_LEN && (h.start === VIP_LATE_START || h.start === VIP_LATE_START + 2);
+    const rel = late ? LATE_BRK_REL : Number.isFinite(p.brk) && Number.isFinite(p.start) ? p.brk - p.start : Math.floor(h.len / 2) - 1;
     p.split = null;
     applyHoursToPerson(p, h.start, h.len, clamp(h.start + rel, h.start, h.start + h.len - BRK_LEN));
   }
@@ -236,10 +239,9 @@ export function makeEngine(cal, live, nowMs) {
     const off = dstSlots(key);
     people.forEach(p => {
       if (blk.late && p.name === blk.late) {
-        const rel = Number.isFinite(p.brk) && Number.isFinite(p.start) ? p.brk - p.start : Math.floor(VIP_LATE_LEN / 2) - 1;
         const start = VIP_LATE_START + off;
         p.split = null;
-        applyHoursToPerson(p, start, VIP_LATE_LEN, clamp(start + rel, start, start + VIP_LATE_LEN - 2));
+        applyHoursToPerson(p, start, VIP_LATE_LEN, start + LATE_BRK_REL);
       }
       if (blk.phase1 && p.name === blk.phase1) {
         p.roles = Object.assign({}, rolesOf(p), { phase1: true, vip: false });
@@ -317,9 +319,8 @@ export function makeEngine(cal, live, nowMs) {
     [["vip", cov.vip], ["phase1", cov.phase1]].forEach(([kind, name]) => {
       const p = name && people.find(x => x.name === name);
       if (!p) return;
-      const rel = Number.isFinite(p.brk) && Number.isFinite(p.start) ? p.brk - p.start : Math.floor(VIP_LATE_LEN / 2) - 1;
       p.split = null;
-      applyHoursToPerson(p, start, VIP_LATE_LEN, clamp(start + rel, start, start + VIP_LATE_LEN - 2));
+      applyHoursToPerson(p, start, VIP_LATE_LEN, start + LATE_BRK_REL);
       p.roles = Object.assign({}, rolesOf(p), kind === "vip" ? { vip: true, phase1: false } : { phase1: true, vip: false });
     });
   }
