@@ -439,6 +439,12 @@ check("command: ...and the calendar API then says Jawad is off and the Phase 1 n
 const both = cmd([{ op: "off", people: ["jawad"], dates: "today" }, { op: "takeover", name: "raza", from: "jawad", dates: "today" }]);
 const bothDay = intercomPlan({ updatedAt: "x", calendar: both.cal }, "2026-11-18", 1, NOW, { live: null, emails: [] }).days[0];
 check("command: 'jawad is off today and raza covers him': Raza works Jawad's 8pm-5am Phase 1 shift, and the 6pm anchor Raza left is an open need that names why", both.ok && bothDay.covers.some(c => c.text === "Raza is covering Jawad on their 8pm–5am Phase 1 shift.") && bothDay.needsCover.some(n => n.text === "Anchor shift 6pm–3am VIP is uncovered. Raza is covering Jawad." ) && bothDay.queues.Raza === "phase1");
+import { makeEngine } from "./src/covers.js";
+const whole = (cal, name) => { const d = makeEngine(cal, null, NOW).resolveDay("2026-11-18"); return d.people.find(p => p.name === name); };
+const rz = whole(both.cal, "Raza");
+check("command: someone covering takes the covered person's whole shift, break included (Raza's 12 becomes Jawad's 16)", rz.start === whole(both.cal, "Jawad").start && rz.brk === whole(both.cal, "Jawad").brk && rz.brk !== whole(cmdCal, "Raza").brk);
+const ch2 = cmd([{ op: "off", people: ["jawad"], dates: "today" }, { op: "takeover", name: "raza", from: "jawad", shift: "10.30", dates: "today" }, { op: "takeover", name: "zarminay", from: "raza", shift: "6pm", dates: "today" }]);
+check("command: a named shift takes the break of whoever normally works it (Zarminay on the 6pm anchor gets Raza's own 6pm break)", whole(ch2.cal, "Zarminay").start === whole(cmdCal, "Raza").start && whole(ch2.cal, "Zarminay").brk === whole(cmdCal, "Raza").brk);
 const mv = cmd([{ op: "move", name: "Jawad", queue: "phase1", shift: "10.30", dates: "from 20th Nov to 25th Nov" }]);
 check("command: 'move Jawad to Phase 1 and the 10.30 shift from 20th Nov to 25th Nov': only the days named, Saturday and Sunday skipped with the reason", mv.ok && Object.keys(mv.cal.changes).join() === "2026-11-20,2026-11-23,2026-11-24,2026-11-25" && mv.result.skipped.length === 2 && /Saturdays follow the Weekend Cover/.test(mv.result.skipped[0]) && mv.result.summary[0] === "Jawad moved to Phase 1 and to the late shift 10:30pm–7:30am Fri 20 Nov, Mon 23 Nov to Wed 25 Nov.");
 const mvPlan = intercomPlan({ updatedAt: "x", calendar: mv.cal }, "2026-11-19", 3, NOW, { live: null, emails: [] });

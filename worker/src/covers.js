@@ -152,7 +152,14 @@ export function makeEngine(cal, live, nowMs) {
     p.split = null;
     applyHoursToPerson(p, h.start, h.len, clamp(h.start + rel, h.start, h.start + h.len - BRK_LEN));
   }
+  // Someone covering takes the covered person's whole shift: hours, break and split, as they stood before any change that night.
+  function takeWhole(p, o, h) {
+    if (!h || (h.start === o.start && h.len === o.len)) { applyHoursToPerson(p, o.start, o.len, o.brk); p.split = o.split ? clone(o.split) : null; return; }
+    takeHours(p, h);
+  }
   function applyChanges(people, key, baked) {
+    const orig = {};
+    people.forEach(x => { orig[x.name] = { start: x.start, len: x.len, brk: x.brk, split: x.split ? clone(x.split) : null }; });
     changesFor(key).forEach(c => {
       if (baked && baked.has(c.id)) return;
       const find = n => people.find(x => x.name === n);
@@ -166,7 +173,10 @@ export function makeEngine(cal, live, nowMs) {
         const p = find(c.name), from = find(c.from);
         if (!p || !from || p === from) return;
         const r = rolesOf(from);
-        takeHours(p, (c.shift && changeHours(key, c.shift)) || { start: from.start, len: from.len });
+        const o = orig[c.from] || { start: from.start, len: from.len, brk: from.brk, split: from.split };
+        const h = c.shift && changeHours(key, c.shift);
+        const holder = h && !(h.start === o.start && h.len === o.len) && Object.keys(orig).map(n => orig[n]).find(x => x.start === h.start && x.len === h.len);
+        if (holder) takeWhole(p, holder, null || h); else takeWhole(p, o, h);
         // the anchor shifts are VIP seats; any other shift keeps the queue of the person being covered
         p.roles = Object.assign({}, rolesOf(p), c.shift && c.shift.kind === "anchor" ? { phase1: false, vip: true } : { phase1: r.phase1, vip: r.vip });
       } else if (c.type === "swap") {
