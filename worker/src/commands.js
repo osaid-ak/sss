@@ -41,12 +41,19 @@ function person(raw, roster) {
   throw new OpError('"' + raw + '" could mean ' + hits.map(h => h.name).join(" or ") + ": say which");
 }
 const queueWord = q => {
-  const t = String(q || "").toLowerCase().replace(/[\s_-]+/g, "");
-  if (t === "phase1" || t === "p1" || t === "phase") return "phase1";
-  if (t === "vip" || t === "viphandling") return "vip";
-  if (t === "both" || t === "phase1andvip" || t === "phase1+vip") return "both";
+  const t = String(q || "").toLowerCase().replace(/[\s_-]+/g, "").replace(/(?:the|queue|team|teams|handling)/g, "").replace(/one$/, "1");
+  if (t === "phase1" || t === "p1" || t === "phase" || t === "tier1") return "phase1";
+  if (t === "vip") return "vip";
+  if (t === "both" || t === "phase1andvip" || t === "phase1+vip" || t === "vipandphase1" || t === "bothphase1andvip") return "both";
   return null;
 };
+// "the late shift", "late-shift", "10.30 shift", "the 6 pm anchor", "1030", "from 7pm to 4am" -> the plain words and clocks the rest reads
+function cleanShiftText(x) {
+  return String(x == null ? "" : x).toLowerCase()
+    .replace(/\b(the|a|an|at|from|starting|please|shift|shifts|anchor|slot|seat)\b/g, " ")
+    .replace(/(?<=[a-z])[-\u2013\u2014]+(?=\s|$)/g, " ").replace(/\s+/g, " ").trim()
+    .replace(/^(\d{1,2})(\d{2})$/, "$1:$2");
+}
 const qLabel = q => (q === "phase1" ? "Phase 1" : q === "vip" ? "VIP" : "Phase 1 and VIP");
 
 // "Mon 23 Nov to Wed 25 Nov, Fri 27 Nov": runs of days (a Sunday between two days does not break a run)
@@ -85,11 +92,14 @@ function shiftFor(spec, key) {
   const warn = [];
   let s = spec;
   if (typeof s === "string") {
-    const t = s.trim().toLowerCase();
-    const range = t.match(/^(.+?)\s*(?:-|–|—|to|till|until)\s*(.+)$/);
-    if (/^late(?: shift)?$/.test(t)) s = { kind: "late" };
+    const t = cleanShiftText(s);
+    const range = t.match(/^(.+?)\s*(?:-|–|—|\bto\b|\btill\b|\buntil\b)\s*(.+)$/);
+    if (/^late$/.test(t)) s = { kind: "late" };
     else if (range && clockMinutes(range[1]) != null && clockMinutes(range[2]) != null) s = { hours: { from: range[1], to: range[2] } };
-    else s = { clock: t.replace(/\s*(shift|anchor)$/, "") };
+    else s = { clock: t };
+  } else if (s && typeof s === "object" && s.clock != null) {
+    s = Object.assign({}, s, { clock: cleanShiftText(s.clock) });
+    if (/^late$/.test(s.clock)) s = { kind: "late" };
   }
   if (!s || typeof s !== "object") throw new OpError("the shift is missing");
   if (s.hours) {
