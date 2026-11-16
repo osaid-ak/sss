@@ -15,6 +15,9 @@
 // reported as a decision with that queue (so the rotation person, if named as a VIP, goes to VIP for the Saturday, and one who is not named
 // stays where they are). Sheet data is read live when the caller passes it (see sheets.js); the stored copy is the fallback.
 
+import { matchName } from "./sheets.js";
+import { makeEngine, coversForDay } from "./covers.js";
+
 const DAY_MS = 86400000;
 const PKT_MS = 5 * 3600000;
 const KEY = /^\d{4}-\d{2}-\d{2}$/;
@@ -58,15 +61,6 @@ function isLead(p) {
 
 function blockOn(blocks, key) {
   return (blocks || []).find(b => b && b.start <= key && key <= b.end) || null;
-}
-// The sheet's spelling of a name -> the roster's: exact (any case), then a single roster name that starts the other way round, else as written.
-function matchName(raw, roster) {
-  const needle = String(raw || "").trim().toLowerCase();
-  if (!needle) return "";
-  const exact = roster.find(p => p.name.toLowerCase() === needle);
-  if (exact) return exact.name;
-  const loose = roster.filter(p => p.name.toLowerCase().startsWith(needle) || needle.startsWith(p.name.toLowerCase()));
-  return loose.length === 1 ? loose[0].name : String(raw).trim();
 }
 // The person's email: the one written on the roster entry, otherwise the one allowed email whose name part contains their name
 // (muhammad.jawad@ for Jawad). More than one candidate, or none: null, so the caller cannot treat it as verified.
@@ -144,8 +138,32 @@ export function intercomPlan(doc, fromKey, days, nowMs, ctx) {
     weekends: live.weekends ? new Map(live.weekends.map(w => [w.date, w])) : null,
     blocks: live.blocks && live.blocks.length ? live.blocks : null
   };
+  // who is off and who is covering whom, from the same logic as the page (covers.js). This is extra information: if anything in it
+  // fails on odd data, the queue decisions the Intercom moves depend on are still answered, and the day says `coversError`.
+  let engine = null, engineError = "";
+  try { engine = makeEngine(cal, live, nowMs); } catch (e) { engineError = String((e && e.message) || e).slice(0, 200); }
   const list = [];
-  for (let i = 0; i < days; i++) list.push(dayPlan(cal, addDaysKey(fromKey, i), liveFor, emails));
+  for (let i = 0; i < days; i++) {
+    const key = addDaysKey(fromKey, i);
+    const day = dayPlan(cal, key, liveFor, emails);
+    try {
+      if (!engine) throw new Error(engineError);
+      let weekendNames = [];
+      if (day.kind === "saturday") {
+        const wc = liveFor.weekends ? liveFor.weekends.get(key) : (cal.days && cal.days[key] && cal.days[key].weekendCover);
+        if (wc) weekendNames = [wc.phase1].concat(wc.vip || []).map(n => matchName(n, roster)).filter(Boolean);
+      }
+      const extra = coversForDay(engine, key, weekendNames);
+      day.lateShift = extra.rotation.lateShift;
+      day.away = extra.away;
+      day.covers = extra.covers;
+      day.needsCover = extra.needsCover;
+    } catch (e) {
+      day.lateShift = null; day.away = []; day.covers = []; day.needsCover = [];
+      day.coversError = String((e && e.message) || e).slice(0, 200);
+    }
+    list.push(day);
+  }
   return {
     version: 1,
     generatedAt: new Date(nowMs).toISOString(),

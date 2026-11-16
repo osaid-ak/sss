@@ -27,7 +27,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import timedelta, timezone
+from datetime import date, timedelta, timezone
 
 PKT = timezone(timedelta(hours=5))
 QUEUES = ("phase1", "vip", "both")
@@ -99,6 +99,12 @@ def parse_plan(text, day, days=1):
             raise CalendarError("calendar plan has a malformed day")
         if not isinstance(e.get("decisions"), list):
             raise CalendarError(f"calendar plan day {e.get('date')} has no decisions list")
+        for field in ("away", "covers", "needsCover"):
+            if field in e and (not isinstance(e[field], list) or any(not isinstance(x, dict) for x in e[field])):
+                raise CalendarError(f"calendar plan day {e['date']} has a malformed {field} list")
+        for c in e.get("covers", []):
+            if not isinstance(c.get("text"), str) or not isinstance(c.get("name"), str):
+                raise CalendarError(f"calendar plan day {e['date']} has a malformed cover")
         q = e.get("queues")
         if q is not None and (not isinstance(q, dict) or any(v not in QUEUES + ("lead",) for v in q.values())):
             raise CalendarError(f"calendar plan day {e['date']} has malformed queues")
@@ -205,6 +211,37 @@ def reasons(entry):
 
 
 # --------------------------------------------------------------------------- the hourly decision
+
+# --------------------------------------------------------------------------- the start-of-day message
+
+AWAY_LABEL = {"off": "holiday off", "pto": "PTO or leave"}
+
+
+def cover_error(entry):
+    """The calendar sets `coversError` on a day whose cover list it could not work out (the queue answer is still fine). -> text or None.
+    Log it; do not post a cover message for that day."""
+    return entry.get("coversError") or None
+
+
+def cover_digest(entry):
+    """The Slack text for one shift day's covers, or None when there is nothing to say. Built only from what the calendar sends:
+      * who is off (`away`),
+      * each cover as the calendar words it (`covers[].text`, e.g. "Raza is covering Ammana on the VIP late shift 10:30pm–7:30am."),
+      * what still needs a lead (`needsCover[].text`), marked with a warning.
+    Sunday is closed and has none. The calendar page shows the same sentences in its "Covering tonight" box."""
+    if entry.get("kind") == "sunday" or entry.get("coversError"):
+        return None
+    lines = []
+    away = entry.get("away") or []
+    if away:
+        lines.append("Off: " + ", ".join(f"{a['name']} ({AWAY_LABEL.get(a.get('kind'), 'off')})" for a in away))
+    lines += [c["text"] for c in entry.get("covers") or []]
+    lines += [":warning: " + n["text"] for n in entry.get("needsCover") or []]
+    if not lines:
+        return None
+    d = date.fromisoformat(entry["date"])
+    return f"*Cover for {entry.get('weekday', d.strftime('%a'))} {d.day} {d.strftime('%b')}*\n" + "\n".join("• " + t for t in lines)
+
 
 def sheet_baseline(rotation_ids, person_id):
     """What the sheet intends for the rotation people: the block's Phase 1 person on Phase 1, everybody else in VIP.

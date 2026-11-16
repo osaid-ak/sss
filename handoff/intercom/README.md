@@ -57,7 +57,15 @@ Answer (see `sample_response.json`, a real answer from the worker's code):
       "boundary": "2026-11-17T15:00:00+05:00",
       "rotationPhase1": "Jawad", "edited": true,
       "decisions": [{ "name": "Ivan", "email": "ivan@autoleap.com", "queue": "phase1", "reason": "day edited by a lead", "lead": false }],
-      "queues": { "Ivan": "phase1", "Jawad": "phase1", "Raza": "vip" }
+      "queues": { "Ivan": "phase1", "Jawad": "phase1", "Raza": "vip" },
+      "lateShift": "Ammana",
+      "away": [{ "name": "Jawad", "kind": "pto" }],
+      "covers": [
+        { "kind": "late", "name": "Ivan", "for": null, "what": "the VIP late shift 10:30pm–7:30am",
+          "text": "Ivan is covering the VIP late shift 10:30pm–7:30am.",
+          "from": "10:30pm", "to": "7:30am", "fromAt": "2026-11-17T17:30:00.000Z", "toAt": "2026-11-18T02:30:00.000Z" }
+      ],
+      "needsCover": []
     }
   ]
 }
@@ -69,12 +77,17 @@ Answer (see `sample_response.json`, a real answer from the worker's code):
 - `reason`: `day edited by a lead`, `Phase 1 queue cover`, `VIP late shift cover`, `Phase 1 late shift cover`, `weekend cover`. Use it in the Slack message.
 - **`queues`** is the calendar's own full picture (every roster person's queue that day, including the sheet rotation). The automation does **not** act on it; use it only as a cross-check in shadow mode (`cross_check`): a difference means the sheet and the calendar disagree about someone.
 - `email` (decisions and roster): the one written on the roster entry in the calendar, otherwise the single allowed teammate email that contains the person's name (`muhammad.jawad@...` for Jawad), otherwise `null` (cannot be verified).
+- **`away`**: who is off that shift day: `kind` is `off` (a confirmed holiday "off") or `pto` (holiday PTO or approved leave). Pending leave and draft holiday plans do not count, exactly as on the calendar.
+- **`covers`**: who is covering whom, as the calendar words it. `kind` is `late` (a lead added late-shift cover), `queue` (a VIP rep moved to Phase 1 because the Phase 1 person is off), `anchor` (the sheet's Anchor Cover 1 / 2 covering an anchor shift the block's Late Shift or Phase 1 person normally works), `line` (the Support Line backup, or whoever holds the slot of an owner who is off) or `hours` (anyone else working hours other than their original shift). Each has `name`, `for` (who they cover, or null), `what`, a ready sentence in `text` (the same sentence as the calendar's "Covering tonight" box), `extra` when the calendar adds a note (for example how the backup's shift moved), and the times: `from` / `to` in PKT as the calendar shows them (for example `10:30pm`, `7:30am`) and `fromAt` / `toAt` as UTC instants. The times follow daylight saving like the calendar. The block's Late Shift and Phase 1 Coverage people are not in `covers` (they are the rotation: see `lateShift` and `rotationPhase1`).
+- **`needsCover`**: what still needs a lead, as the calendar's red alerts word it: a late shift without a VIP or Phase 1 person, an uncovered anchor shift, a Phase 1 person who is off with no queue cover, a Support Line slot whose owner is off and nobody can take it. `kind` is `late`, `anchor`, `phase1` or `line`. Empty when everything is arranged.
+- **`lateShift`**: the block's Late Shift person.
+- All of this is computed on the server with the calendar page's own logic (ported function by function and compared with the page itself, see the end of this section). Saturdays have no covers (only `away` for the people the Weekend Cover names); Sundays have nothing.
 - `rotationPhase1` is who the **sheet** (read live by the calendar) says is on Phase 1; on a Saturday it is Friday's block person. Information for shadow mode.
 - `roster[].normalQueue` is each person's queue with nothing decided (used to put people back).
 - `sources` says where the sheet data came from (`sheet` = read just now, `stored` = the calendar's saved copy because Google could not be read). Log it when it is `stored`.
 - Names are the calendar's roster names (first names). Match them to Intercom IDs with the map in your config and **verify with the email**. **Never guess a name.**
 
-The weekday rules were checked against the calendar page itself on 800 person-days of the real plan (hand edits and covers included): no differences. The sheet reader was compared with the page's reader on the live tabs (41 weekends, 50 blocks: identical).
+The weekday queue rules were checked against the calendar page itself on 800 person-days of the real plan (hand edits and covers included): no differences. The cover logic (`away`, `covers`, `needsCover`) was checked against the page itself on the real plan and on 13 randomised plans (leave, holiday offs, late and queue covers, anchor covers, hand-edited days, Support Line backups, changed shift hours, across the November, March and November clock changes): about 1,900 covers of all five kinds, 800+ people off and 400+ open needs, identical to the page. The sheet readers (Weekend Cover, VIP Coverage Plan with the anchor columns, and the Phase 1 / Support Line tab) were compared with the page's readers on the live tabs: identical.
 
 ## 3. Changes to make in the automation
 
@@ -134,7 +147,7 @@ kind = co.day_kind(day)            # "weekday" | "saturday" | "sunday", from the
        plan = co.fetch_plan(cal["url"], os.environ["CALENDAR_API_KEY"], day, days=1)
        entry = co.day_entry(plan, day)
    except (co.CalendarError, KeyError, SystemExit) as e:             # SystemExit: Intercom's helper exits on an API error
-       plan = None   # fall back to the sheet-only run you have today (section 3.6), warn once
+       plan = None   # fall back to the sheet-only run you have today (section 3.7), warn once
    ```
 5. **Decide** (pure, no side effects). Use the memberships *after* undoing recorded manual changes on a weekly reset, as your code already computes (`p1_eff`, `vip_eff`):
 
@@ -170,7 +183,30 @@ In `shadow` run steps 1 to 5 with `days=4` (so Saturday is previewed) and **writ
 
 Go to `on` when two weeks of shadow messages are all what the leads meant and nothing looked wrong in the cross-checks.
 
-### 3.6 If the calendar is unavailable (the must-not-fail rule)
+### 3.6 The start-of-day cover message (Slack)
+
+A message once per shift day, listing what the calendar knows about cover. Everything in it comes from the API; nothing is computed in the automation.
+
+- **When**: the first hourly run of the shift day, which is the 15:00 PKT run (or another time you choose; the API is current at any hour). Remember the day you posted for in the state (`state["cover_digest"] = {"day": "2026-11-17", "text": "<what was posted>"}`) so a second run the same day posts nothing.
+- **What**: `text = co.cover_digest(entry)` for the day's entry (`days=1` is enough). It returns `None` when nobody is off, nothing is covered and nothing is open: then post nothing. Example:
+
+  ```
+  *Cover for Wed 18 Nov*
+  • Off: Jawad (PTO or leave)
+  • Ivan is covering the VIP late shift 10:30pm–7:30am.
+  • Ammana is covering Jawad on Phase 1.
+  • Raza is covering Jawad on the 8pm–5am VIP shift.
+  ```
+
+  Open needs appear as `:warning:` lines, for example "Late shift 10:30pm–7:30am needs a Phase 1 person."
+- **Changes during the day**: if a lead adds or removes a cover after the message went out, the text of a later run differs. Post a short thread reply with the new full text (`state["cover_digest"]["text"] != text`), once per change; or post nothing and let the 15:00 message stand. Choose one and keep it simple.
+- **Where**: the support channel the leads use; it is not an alert, so keep it out of #support-leads unless that is where they want it.
+- If a day carries `coversError` (the calendar could not work out its cover list; the queue answer is still fine) `co.cover_digest` returns None; log `co.cover_error(entry)` and carry on.
+- It is independent of `mode`: it only reads the calendar, and a calendar failure just means no message that day (log it, do not retry in a loop, never block the Intercom work).
+
+One thing the message cannot say: it reports covers the calendar knows. A late-shift cover a lead adds by hand does not vacate that person's own anchor shift in the calendar (the anchor logic follows the sheet's block people), so "Raza covers the late shift, so who covers his 6pm?" only appears if the sheet's Anchor Cover columns say so.
+
+### 3.7 If the calendar is unavailable (the must-not-fail rule)
 
 | Situation | What happens |
 | --- | --- |
@@ -187,7 +223,7 @@ Rollback: set `"mode": "off"` and redeploy the config. Or revoke the key (sectio
 
 ## 4. Tests
 
-- `python -m unittest test_calendar_overlay -v` runs 53 checks of the module: shift day boundary, plan validation, the calendar's moves, both Saturday cases, Sunday, the email check, leads, limits, `desired_state` precedence, acting on changes only, and **hourly simulations against a fake Intercom** (lead edit applied at the next run and undone the next day, the calendar beating the sheet, manual moves lasting until something changes, the Monday check, Saturday and Monday, the next block).
+- `python -m unittest test_calendar_overlay -v` runs 59 checks of the module: shift day boundary, plan validation, the calendar's moves, both Saturday cases, Sunday, the email check, leads, limits, `desired_state` precedence, acting on changes only, and **hourly simulations against a fake Intercom** (lead edit applied at the next run and undone the next day, the calendar beating the sheet, manual moves lasting until something changes, the Monday check, Saturday and Monday, the next block).
 - Add to the automation's own suite (it already has `calendar_test.py`): with the calendar on, two consecutive quiet weekdays and a manual `/phase` move of a rotation person in between leave that move in place at the next 3pm run.
 - Dry runs with your existing `--now` (no `--apply`), using the calendar's real data for those dates. All times PKT:
 

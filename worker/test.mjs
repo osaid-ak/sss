@@ -1,5 +1,6 @@
 // Offline checks for the sign-in gate and roles. Run: node test.mjs
 import worker, { PlanStore } from "./src/index.js";
+import { intercomPlan } from "./src/intercom.js";
 
 const kvStore = new Map();
 const env = {
@@ -323,7 +324,7 @@ sheetMock = url => {
 };
 const liveBody = await (await keyed("/api/v1/intercom-plan?from=2026-11-16&days=8", "key-for-intercom-123")).json();
 const liveDay = d => liveBody.days.find(x => x.date === d);
-check("the sheet is read live on every call and the answer says so", sheetCalls === 2 && liveBody.sources.weekendCover === "sheet" && liveBody.sources.rotation === "sheet");
+check("the sheet is read live on every call and the answer says so", sheetCalls === 3 && liveBody.sources.weekendCover === "sheet" && liveBody.sources.rotation === "sheet");
 check("live rotation: Monday's rotation person is the sheet's (Ivan), not the stored copy's (Raza)", liveDay("2026-11-16").rotationPhase1 === "Ivan");
 check("live weekend names win over the stored ones", liveDay("2026-11-21").decisions.map(d => d.name + ":" + d.queue).join(",") === "Ammana:phase1,Ivan:vip,Osaid:vip" && liveDay("2026-11-21").rotationPhase1 === "Ivan");
 check("an edited day is judged against the live rotation (Raza is no longer the Phase 1 person)", liveDay("2026-11-17").decisions.map(d => d.name).join(",") === "Raza");
@@ -333,6 +334,62 @@ check("one tab unreadable: that tab falls back to the stored copy and the answer
 sheetMock = () => { throw new Error("network down"); };
 const down = await keyed("/api/v1/intercom-plan?from=2026-11-16&days=8", "key-for-intercom-123");
 check("sheet completely unreachable: the answer still works from the stored plan", down.status === 200 && (await down.json()).sources.weekendCover === "stored");
+sheetMock = () => new Response("forbidden", { status: 403 });
+
+// 7. who is off and who is covering whom (the page's own logic, ported; compared with the page in the browser on many plans)
+const CP = (name, extra) => Object.assign({ name, roles: { vip: true }, start: 6, len: 18, brk: 14, split: null, queue: "vip", group: "VIP" }, extra || {});
+const coverCal = {
+  people: [CP("Ammana"), CP("Raza", { start: 4, brk: 12 }), CP("Zarminay"), CP("Ivan"), CP("Jawad", { start: 8, brk: 16 }),
+    CP("Ayeshah", { roles: { phase1: true }, queue: "phase1", group: "Phase 1" }),
+    CP("Qasim", { roles: { phase1: true, line: true }, queue: "phase1", group: "Phase 1" }),
+    CP("Laraib", { roles: { phase1: true, line: true }, queue: "phase1", group: "Phase 1" })],
+  // Raza (the 6pm-3am anchor shift) is the block's Late Shift person, so his anchor is vacated and Zarminay (Anchor Cover 1) covers it
+  vipPlan: { blocks: [{ start: "2026-11-16", end: "2026-11-27", late: "Raza", phase1: "Jawad", cover1: "Zarminay", cover2: "" }], readAt: "x" },
+  leaves: [{ id: "l1", name: "Ammana", start: "2026-11-17", end: "2026-11-17", status: "approved" }, { id: "l2", name: "Laraib", start: "2026-11-18", end: "2026-11-18", status: "approved" }, { id: "l3", name: "Ivan", start: "2026-11-18", end: "2026-11-18", status: "pending" }],
+  holidays: [{ id: "h1", status: "confirmed", offs: { "2026-11-19": { Ivan: "off", Qasim: "pto" } } }, { id: "h2", status: "draft", offs: { "2026-11-20": { Zarminay: "off" } } }],
+  lateCover: { "2026-11-17": { vip: "Ivan", p1q: "Ayeshah" } },
+  sheetPlan: { hours: {}, line: [{ start: "2026-11-16", end: "2026-11-27", slots: ["Laraib", "Qasim", "Ayeshah"], backup: "Ivan" }], readAt: "x" },
+  days: { "2026-11-24": { people: [CP("Ammana"), CP("Zarminay")], lineBars: [] }, "2026-11-21": { people: [], lineBars: [], weekendCover: { phase1: "Ivan", vip: ["Raza", "Ammana"] } } },
+  lineBars: []
+};
+const cvPlan = intercomPlan({ updatedAt: "x", calendar: coverCal }, "2026-11-16", 10, Date.parse("2026-11-16T10:00:00Z"), { live: null, emails: [] });
+const cv = d => cvPlan.days.find(x => x.date === d);
+const texts = d => cv(d).covers.map(c => c.text);
+check("away: approved leave and confirmed holiday offs count, pending leave and draft plans do not", cv("2026-11-17").away.map(a => a.name + ":" + a.kind).join() === "Ammana:pto" && cv("2026-11-18").away.map(a => a.name).join() === "Laraib" && cv("2026-11-19").away.map(a => a.name + ":" + a.kind).join() === "Ivan:off,Qasim:pto" && cv("2026-11-20").away.length === 0);
+check("anchor cover: the vacated 6pm-3am shift of the Late Shift person is covered by Anchor Cover 1, with the times", texts("2026-11-16").includes("Zarminay is covering Raza on the 6pm–3am VIP shift.") && cv("2026-11-16").covers.find(c => c.kind === "anchor").from === "6pm" && cv("2026-11-16").covers.find(c => c.kind === "anchor").to === "3am");
+const lateCover = cv("2026-11-17").covers.find(c => c.kind === "late");
+check("late shift cover: who, what and the exact times (PKT, and as UTC instants)", lateCover.name === "Ivan" && lateCover.text === "Ivan is covering the VIP late shift 10:30pm–7:30am." && lateCover.from === "10:30pm" && lateCover.to === "7:30am" && lateCover.fromAt === "2026-11-17T17:30:00.000Z" && lateCover.toAt === "2026-11-18T02:30:00.000Z");
+check("Phase 1 queue cover names the rotation person it replaces", texts("2026-11-17").includes("Ayeshah is covering Jawad on Phase 1."));
+check("Support Line: the sheet's backup takes the slot of an owner who is off, and says how the shift moved", texts("2026-11-18").includes("Ivan is covering Laraib on Support Line 6pm–10pm. Ivan's shift was adjusted to 6pm–3am to cover the Support Line."));
+check("needs cover: a late shift without a Phase 1 person, an uncovered anchor, and a Support Line slot nobody can take", cv("2026-11-19").needsCover.some(n => n.kind === "late" && /needs a Phase 1 person/.test(n.text)) && cv("2026-11-19").needsCover.some(n => n.kind === "anchor" && /Anchor 2 on the VIP Coverage Plan sheet/.test(n.text)) && cv("2026-11-19").needsCover.some(n => n.kind === "line" && n.text === "Support Line 10pm–1am owner Qasim is off. Backup Ivan is off too."));
+check("the rotation people are named (Late Shift person), and a hand-edited day has no anchor cover", cv("2026-11-16").lateShift === "Raza" && !cv("2026-11-24").covers.some(c => c.kind === "anchor"));
+check("Saturday: only the weekend names can be away, no covers; Sunday: nothing", cv("2026-11-21").covers.length === 0 && cv("2026-11-21").needsCover.length === 0 && cv("2026-11-22").covers.length === 0 && cv("2026-11-22").away.length === 0);
+check("every cover has text and times where the page has a time", cvPlan.days.every(d => d.covers.every(c => typeof c.text === "string" && c.text.endsWith(".") && (c.from ? !!c.fromAt && !!c.toAt : true))));
+const satLeave = JSON.parse(JSON.stringify(coverCal));
+satLeave.leaves.push({ id: "l9", name: "Raza", start: "2026-11-21", end: "2026-11-21", status: "approved" });
+check("Saturday: a weekend cover person on leave shows as away", intercomPlan({ updatedAt: "x", calendar: satLeave }, "2026-11-21", 1, Date.parse("2026-11-16T10:00:00Z"), { live: null, emails: [] }).days[0].away.map(a => a.name).join() === "Raza");
+// odd data in the cover logic must never take the queue decisions down with it
+const oddCal = JSON.parse(JSON.stringify(coverCal));
+oddCal.days["2026-11-19"] = { people: "not a list", lineBars: [] };
+const odd = intercomPlan({ updatedAt: "x", calendar: oddCal }, "2026-11-18", 3, Date.parse("2026-11-16T10:00:00Z"), { live: null, emails: [] });
+check("a day the cover logic cannot read says so (coversError) and its queue answer is still there; the other days are unaffected", odd.days[1].coversError && odd.days[1].covers.length === 0 && Array.isArray(odd.days[1].decisions) && odd.days[1].queues && !odd.days[0].coversError && !odd.days[2].coversError);
+// clocks change: on the summer schedule (March) the same stored shifts sit one hour earlier
+const summer = intercomPlan({ updatedAt: "x", calendar: coverCal }, "2026-11-16", 1, Date.parse("2026-11-16T10:00:00Z"), { live: null, emails: [] }).days[0];
+const springCal = JSON.parse(JSON.stringify(coverCal));
+springCal.vipPlan.blocks[0].start = "2027-03-15"; springCal.vipPlan.blocks[0].end = "2027-03-26";
+const spring = intercomPlan({ updatedAt: "x", calendar: springCal }, "2027-03-16", 1, Date.parse("2027-03-16T10:00:00Z"), { live: null, emails: [] }).days[0];
+check("daylight time moves the covers' clocks with the page (summer: 5pm-2am anchor, standard: 6pm-3am)", summer.covers.find(c => c.kind === "anchor").from === "6pm" && spring.covers.find(c => c.kind === "anchor").from === "5pm");
+// the Phase 1 / Support Line tab read live: its current shift differs from the original, so the person shows as covering
+sheetMock = url => {
+  const row = cells => ({ c: cells.map(v => ({ v })) });
+  const body = url.includes("gid=274979110")
+    ? { status: "ok", table: { rows: [row(["", "", "", "Raza", "Ivan"]), row(["", "", "", "6PM - 3AM", "7PM - 4AM"]), row(["", "", "", "6PM - 3AM", "9PM - 6AM"]), row(["", "", "", "10 - 11", "1 - 2"])] } }
+    : url.includes("gid=") ? { status: "error" } : null;
+  return body ? new Response("/*O_o*/" + String.fromCharCode(10) + "google.visualization.Query.setResponse(" + JSON.stringify(body) + ");") : new Response("no", { status: 404 });
+};
+env.API_KEYS = "intercom:key-for-intercom-123";
+const liveTab = await (await keyed("/api/v1/intercom-plan?from=2026-11-19&days=1", "key-for-intercom-123")).json();
+check("the Phase 1 / Support Line tab is read live: a current shift that differs from the original shows as covering", liveTab.days[0].covers.some(c => c.kind === "hours" && c.name === "Ivan" && c.text === "Ivan is working 9pm–6am instead of their usual 7pm–4am." && c.from === "9pm"));
 sheetMock = () => new Response("forbidden", { status: 403 });
 delete env.API_KEYS;
 check("with no keys configured every call is refused", (await keyed("/api/v1/intercom-plan", "key-for-intercom-123")).status === 401);

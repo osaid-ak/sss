@@ -338,6 +338,42 @@ class Hourly(unittest.TestCase):
         self.assertEqual(co.cross_check(entry(6), {"4": "phase1"}, ids), [])  # Sunday: nothing to compare
 
 
+class Digest(unittest.TestCase):
+    def test_a_day_with_covers_is_worded_as_the_calendar_words_it(self):
+        text = co.cover_digest(entry(2))  # Wed 18 Nov: Jawad is off, Ivan covers the late shift, Ammana covers Phase 1, Raza the anchor
+        self.assertEqual(text.splitlines()[0], "*Cover for Wed 18 Nov*")
+        self.assertIn("• Off: Jawad (PTO or leave)", text)
+        self.assertIn("• Ivan is covering the VIP late shift 10:30pm–7:30am.", text)
+        self.assertIn("• Ammana is covering Jawad on Phase 1.", text)
+        self.assertIn("• Raza is covering Jawad on the 8pm–5am VIP shift.", text)
+
+    def test_a_quiet_day_and_a_sunday_have_no_message(self):
+        self.assertIsNone(co.cover_digest(entry(5)))   # Saturday with nobody off
+        self.assertIsNone(co.cover_digest(entry(6)))   # Sunday
+
+    def test_what_still_needs_a_lead_is_marked(self):
+        e = json.loads(json.dumps(entry(0)))
+        e["needsCover"] = [{"kind": "late", "text": "Late shift 10:30pm–7:30am needs a Phase 1 person."}]
+        self.assertIn("• :warning: Late shift 10:30pm–7:30am needs a Phase 1 person.", co.cover_digest(e))
+
+    def test_an_older_calendar_without_the_cover_fields_just_has_no_message(self):
+        e = {"date": "2026-11-17", "weekday": "Tue", "kind": "weekday", "decisions": []}
+        self.assertIsNone(co.cover_digest(e))
+
+    def test_a_day_the_calendar_could_not_work_out_has_no_message_but_a_reason(self):
+        e = json.loads(json.dumps(entry(2)))
+        e["coversError"] = "boom"
+        self.assertIsNone(co.cover_digest(e))
+        self.assertEqual(co.cover_error(e), "boom")
+        self.assertIsNone(co.cover_error(entry(2)))
+
+    def test_malformed_cover_fields_are_rejected(self):
+        p = json.loads(SAMPLE)
+        p["days"][2]["covers"][0].pop("text")
+        with self.assertRaises(co.CalendarError):
+            co.parse_plan(json.dumps(p), D, 15)
+
+
 class Notes(unittest.TestCase):
     def test_rotation_check(self):
         self.assertIsNone(co.rotation_check(entry(0), "Jawad"))

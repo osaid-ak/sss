@@ -64,7 +64,28 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-11-16T15:00:00+05:00"
+      "boundary": "2026-11-16T15:00:00+05:00",
+      "lateShift": "Ammana",
+      "away": [],
+      "covers": [
+        {
+          "kind": "anchor",
+          "name": "Raza",
+          "for": "Jawad",
+          "what": "the 8pm–5am VIP shift",
+          "text": "Raza is covering Jawad on the 8pm–5am VIP shift.",
+          "from": "8pm",
+          "to": "5am",
+          "fromAt": "2026-11-16T15:00:00.000Z",
+          "toAt": "2026-11-17T00:00:00.000Z"
+        }
+      ],
+      "needsCover": [
+        {
+          "kind": "late",
+          "text": "Late shift 10:30pm–7:30am needs a Phase 1 person."
+        }
+      ]
     },
     {
       "date": "2026-11-17",
@@ -89,7 +110,65 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-11-17T15:00:00+05:00"
+      "boundary": "2026-11-17T15:00:00+05:00",
+      "lateShift": "Ammana",
+      "away": [],
+      "covers": [
+        {
+          "kind": "hours",
+          "name": "Jawad",
+          "for": null,
+          "what": null,
+          "text": "Jawad is working 7pm–4am instead of their usual 8pm–5am.",
+          "from": "7pm",
+          "to": "4am",
+          "fromAt": "2026-11-17T14:00:00.000Z",
+          "toAt": "2026-11-17T23:00:00.000Z"
+        },
+        {
+          "kind": "hours",
+          "name": "Ivan",
+          "for": null,
+          "what": null,
+          "text": "Ivan is working 6pm–3am instead of their usual 7pm–4am.",
+          "from": "6pm",
+          "to": "3am",
+          "fromAt": "2026-11-17T13:00:00.000Z",
+          "toAt": "2026-11-17T22:00:00.000Z"
+        },
+        {
+          "kind": "hours",
+          "name": "Raza",
+          "for": null,
+          "what": null,
+          "text": "Raza is working 5pm–2am instead of their usual 6pm–3am.",
+          "from": "5pm",
+          "to": "2am",
+          "fromAt": "2026-11-17T12:00:00.000Z",
+          "toAt": "2026-11-17T21:00:00.000Z"
+        },
+        {
+          "kind": "hours",
+          "name": "Ammana",
+          "for": null,
+          "what": null,
+          "text": "Ammana is working 6pm–3am instead of their usual 7pm–4am.",
+          "from": "6pm",
+          "to": "3am",
+          "fromAt": "2026-11-17T13:00:00.000Z",
+          "toAt": "2026-11-17T22:00:00.000Z"
+        }
+      ],
+      "needsCover": [
+        {
+          "kind": "late",
+          "text": "Late shift 10:30pm–7:30am needs a VIP person."
+        },
+        {
+          "kind": "late",
+          "text": "Late shift 10:30pm–7:30am needs a Phase 1 person."
+        }
+      ]
     },
     {
       "date": "2026-11-18",
@@ -114,7 +193,50 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-11-18T15:00:00+05:00"
+      "boundary": "2026-11-18T15:00:00+05:00",
+      "lateShift": "Ammana",
+      "away": [
+        {
+          "name": "Jawad",
+          "kind": "pto"
+        }
+      ],
+      "covers": [
+        {
+          "kind": "late",
+          "name": "Ivan",
+          "for": null,
+          "what": "the VIP late shift 10:30pm–7:30am",
+          "text": "Ivan is covering the VIP late shift 10:30pm–7:30am.",
+          "from": "10:30pm",
+          "to": "7:30am",
+          "fromAt": "2026-11-18T17:30:00.000Z",
+          "toAt": "2026-11-19T02:30:00.000Z"
+        },
+        {
+          "kind": "queue",
+          "name": "Ammana",
+          "for": "Jawad",
+          "what": "Phase 1",
+          "text": "Ammana is covering Jawad on Phase 1.",
+          "from": "10:30pm",
+          "to": "7:30am",
+          "fromAt": "2026-11-18T17:30:00.000Z",
+          "toAt": "2026-11-19T02:30:00.000Z"
+        },
+        {
+          "kind": "anchor",
+          "name": "Raza",
+          "for": "Jawad",
+          "what": "the 8pm–5am VIP shift",
+          "text": "Raza is covering Jawad on the 8pm–5am VIP shift.",
+          "from": "8pm",
+          "to": "5am",
+          "fromAt": "2026-11-18T15:00:00.000Z",
+          "toAt": "2026-11-19T00:00:00.000Z"
+        }
+      ],
+      "needsCover": []
     },
     {
       "date": "2026-11-19",
@@ -131,7 +253,28 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-11-19T15:00:00+05:00"
+      "boundary": "2026-11-19T15:00:00+05:00",
+      "lateShift": "Ammana",
+      "away": [],
+      "covers": [
+        {
+          "kind": "anchor",
+          "name": "Raza",
+          "for": "Jawad",
+          "what": "the 8pm–5am VIP shift",
+          "text": "Raza is covering Jawad on the 8pm–5am VIP shift.",
+          "from": "8pm",
+          "to": "5am",
+          "fromAt": "2026-11-19T15:00:00.000Z",
+          "toAt": "2026-11-20T00:00:00.000Z"
+        }
+      ],
+      "needsCover": [
+        {
+          "kind": "late",
+          "text": "Late shift 10:30pm–7:30am needs a Phase 1 person."
+        }
+      ]
     },
     {
       "date": "2026-11-20",
@@ -148,7 +291,28 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-11-20T15:00:00+05:00"
+      "boundary": "2026-11-20T15:00:00+05:00",
+      "lateShift": "Ammana",
+      "away": [],
+      "covers": [
+        {
+          "kind": "anchor",
+          "name": "Raza",
+          "for": "Jawad",
+          "what": "the 8pm–5am VIP shift",
+          "text": "Raza is covering Jawad on the 8pm–5am VIP shift.",
+          "from": "8pm",
+          "to": "5am",
+          "fromAt": "2026-11-20T15:00:00.000Z",
+          "toAt": "2026-11-21T00:00:00.000Z"
+        }
+      ],
+      "needsCover": [
+        {
+          "kind": "late",
+          "text": "Late shift 10:30pm–7:30am needs a Phase 1 person."
+        }
+      ]
     },
     {
       "date": "2026-11-21",
@@ -187,7 +351,11 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-11-21T15:00:00+05:00"
+      "boundary": "2026-11-21T15:00:00+05:00",
+      "lateShift": null,
+      "away": [],
+      "covers": [],
+      "needsCover": []
     },
     {
       "date": "2026-11-22",
@@ -197,7 +365,11 @@
       "edited": false,
       "decisions": [],
       "queues": null,
-      "boundary": "2026-11-22T15:00:00+05:00"
+      "boundary": "2026-11-22T15:00:00+05:00",
+      "lateShift": null,
+      "away": [],
+      "covers": [],
+      "needsCover": []
     },
     {
       "date": "2026-11-23",
@@ -214,7 +386,28 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-11-23T15:00:00+05:00"
+      "boundary": "2026-11-23T15:00:00+05:00",
+      "lateShift": "Ammana",
+      "away": [],
+      "covers": [
+        {
+          "kind": "anchor",
+          "name": "Raza",
+          "for": "Jawad",
+          "what": "the 8pm–5am VIP shift",
+          "text": "Raza is covering Jawad on the 8pm–5am VIP shift.",
+          "from": "8pm",
+          "to": "5am",
+          "fromAt": "2026-11-23T15:00:00.000Z",
+          "toAt": "2026-11-24T00:00:00.000Z"
+        }
+      ],
+      "needsCover": [
+        {
+          "kind": "late",
+          "text": "Late shift 10:30pm–7:30am needs a Phase 1 person."
+        }
+      ]
     },
     {
       "date": "2026-11-24",
@@ -231,7 +424,28 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-11-24T15:00:00+05:00"
+      "boundary": "2026-11-24T15:00:00+05:00",
+      "lateShift": "Ammana",
+      "away": [],
+      "covers": [
+        {
+          "kind": "anchor",
+          "name": "Raza",
+          "for": "Jawad",
+          "what": "the 8pm–5am VIP shift",
+          "text": "Raza is covering Jawad on the 8pm–5am VIP shift.",
+          "from": "8pm",
+          "to": "5am",
+          "fromAt": "2026-11-24T15:00:00.000Z",
+          "toAt": "2026-11-25T00:00:00.000Z"
+        }
+      ],
+      "needsCover": [
+        {
+          "kind": "late",
+          "text": "Late shift 10:30pm–7:30am needs a Phase 1 person."
+        }
+      ]
     },
     {
       "date": "2026-11-25",
@@ -248,7 +462,28 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-11-25T15:00:00+05:00"
+      "boundary": "2026-11-25T15:00:00+05:00",
+      "lateShift": "Ammana",
+      "away": [],
+      "covers": [
+        {
+          "kind": "anchor",
+          "name": "Raza",
+          "for": "Jawad",
+          "what": "the 8pm–5am VIP shift",
+          "text": "Raza is covering Jawad on the 8pm–5am VIP shift.",
+          "from": "8pm",
+          "to": "5am",
+          "fromAt": "2026-11-25T15:00:00.000Z",
+          "toAt": "2026-11-26T00:00:00.000Z"
+        }
+      ],
+      "needsCover": [
+        {
+          "kind": "late",
+          "text": "Late shift 10:30pm–7:30am needs a Phase 1 person."
+        }
+      ]
     },
     {
       "date": "2026-11-26",
@@ -265,7 +500,28 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-11-26T15:00:00+05:00"
+      "boundary": "2026-11-26T15:00:00+05:00",
+      "lateShift": "Ammana",
+      "away": [],
+      "covers": [
+        {
+          "kind": "anchor",
+          "name": "Raza",
+          "for": "Jawad",
+          "what": "the 8pm–5am VIP shift",
+          "text": "Raza is covering Jawad on the 8pm–5am VIP shift.",
+          "from": "8pm",
+          "to": "5am",
+          "fromAt": "2026-11-26T15:00:00.000Z",
+          "toAt": "2026-11-27T00:00:00.000Z"
+        }
+      ],
+      "needsCover": [
+        {
+          "kind": "late",
+          "text": "Late shift 10:30pm–7:30am needs a Phase 1 person."
+        }
+      ]
     },
     {
       "date": "2026-11-27",
@@ -282,7 +538,28 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-11-27T15:00:00+05:00"
+      "boundary": "2026-11-27T15:00:00+05:00",
+      "lateShift": "Ammana",
+      "away": [],
+      "covers": [
+        {
+          "kind": "anchor",
+          "name": "Raza",
+          "for": "Jawad",
+          "what": "the 8pm–5am VIP shift",
+          "text": "Raza is covering Jawad on the 8pm–5am VIP shift.",
+          "from": "8pm",
+          "to": "5am",
+          "fromAt": "2026-11-27T15:00:00.000Z",
+          "toAt": "2026-11-28T00:00:00.000Z"
+        }
+      ],
+      "needsCover": [
+        {
+          "kind": "late",
+          "text": "Late shift 10:30pm–7:30am needs a Phase 1 person."
+        }
+      ]
     },
     {
       "date": "2026-11-28",
@@ -321,7 +598,11 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-11-28T15:00:00+05:00"
+      "boundary": "2026-11-28T15:00:00+05:00",
+      "lateShift": null,
+      "away": [],
+      "covers": [],
+      "needsCover": []
     },
     {
       "date": "2026-11-29",
@@ -331,7 +612,11 @@
       "edited": false,
       "decisions": [],
       "queues": null,
-      "boundary": "2026-11-29T15:00:00+05:00"
+      "boundary": "2026-11-29T15:00:00+05:00",
+      "lateShift": null,
+      "away": [],
+      "covers": [],
+      "needsCover": []
     },
     {
       "date": "2026-11-30",
@@ -348,7 +633,20 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-11-30T15:00:00+05:00"
+      "boundary": "2026-11-30T15:00:00+05:00",
+      "lateShift": "Raza",
+      "away": [],
+      "covers": [],
+      "needsCover": [
+        {
+          "kind": "late",
+          "text": "Late shift 10:30pm–7:30am needs a Phase 1 person."
+        },
+        {
+          "kind": "anchor",
+          "text": "Anchor shift 6pm–3am VIP is uncovered. Raza is on Late Shift this block. Add a VIP rep under Anchor 1 on the VIP Coverage Plan sheet."
+        }
+      ]
     },
     {
       "date": "2026-12-01",
@@ -365,7 +663,20 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-12-01T15:00:00+05:00"
+      "boundary": "2026-12-01T15:00:00+05:00",
+      "lateShift": "Raza",
+      "away": [],
+      "covers": [],
+      "needsCover": [
+        {
+          "kind": "late",
+          "text": "Late shift 10:30pm–7:30am needs a Phase 1 person."
+        },
+        {
+          "kind": "anchor",
+          "text": "Anchor shift 6pm–3am VIP is uncovered. Raza is on Late Shift this block. Add a VIP rep under Anchor 1 on the VIP Coverage Plan sheet."
+        }
+      ]
     },
     {
       "date": "2026-12-02",
@@ -382,7 +693,20 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-12-02T15:00:00+05:00"
+      "boundary": "2026-12-02T15:00:00+05:00",
+      "lateShift": "Raza",
+      "away": [],
+      "covers": [],
+      "needsCover": [
+        {
+          "kind": "late",
+          "text": "Late shift 10:30pm–7:30am needs a Phase 1 person."
+        },
+        {
+          "kind": "anchor",
+          "text": "Anchor shift 6pm–3am VIP is uncovered. Raza is on Late Shift this block. Add a VIP rep under Anchor 1 on the VIP Coverage Plan sheet."
+        }
+      ]
     },
     {
       "date": "2026-12-03",
@@ -399,7 +723,20 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-12-03T15:00:00+05:00"
+      "boundary": "2026-12-03T15:00:00+05:00",
+      "lateShift": "Raza",
+      "away": [],
+      "covers": [],
+      "needsCover": [
+        {
+          "kind": "late",
+          "text": "Late shift 10:30pm–7:30am needs a Phase 1 person."
+        },
+        {
+          "kind": "anchor",
+          "text": "Anchor shift 6pm–3am VIP is uncovered. Raza is on Late Shift this block. Add a VIP rep under Anchor 1 on the VIP Coverage Plan sheet."
+        }
+      ]
     },
     {
       "date": "2026-12-04",
@@ -416,7 +753,20 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-12-04T15:00:00+05:00"
+      "boundary": "2026-12-04T15:00:00+05:00",
+      "lateShift": "Raza",
+      "away": [],
+      "covers": [],
+      "needsCover": [
+        {
+          "kind": "late",
+          "text": "Late shift 10:30pm–7:30am needs a Phase 1 person."
+        },
+        {
+          "kind": "anchor",
+          "text": "Anchor shift 6pm–3am VIP is uncovered. Raza is on Late Shift this block. Add a VIP rep under Anchor 1 on the VIP Coverage Plan sheet."
+        }
+      ]
     },
     {
       "date": "2026-12-05",
@@ -433,7 +783,11 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-12-05T15:00:00+05:00"
+      "boundary": "2026-12-05T15:00:00+05:00",
+      "lateShift": null,
+      "away": [],
+      "covers": [],
+      "needsCover": []
     },
     {
       "date": "2026-12-06",
@@ -443,7 +797,11 @@
       "edited": false,
       "decisions": [],
       "queues": null,
-      "boundary": "2026-12-06T15:00:00+05:00"
+      "boundary": "2026-12-06T15:00:00+05:00",
+      "lateShift": null,
+      "away": [],
+      "covers": [],
+      "needsCover": []
     },
     {
       "date": "2026-12-07",
@@ -460,7 +818,20 @@
         "Osaid": "vip",
         "Ayeshah": "phase1"
       },
-      "boundary": "2026-12-07T15:00:00+05:00"
+      "boundary": "2026-12-07T15:00:00+05:00",
+      "lateShift": "Raza",
+      "away": [],
+      "covers": [],
+      "needsCover": [
+        {
+          "kind": "late",
+          "text": "Late shift 10:30pm–7:30am needs a Phase 1 person."
+        },
+        {
+          "kind": "anchor",
+          "text": "Anchor shift 6pm–3am VIP is uncovered. Raza is on Late Shift this block. Add a VIP rep under Anchor 1 on the VIP Coverage Plan sheet."
+        }
+      ]
     }
   ]
 }
