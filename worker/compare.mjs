@@ -140,6 +140,18 @@ for (let i = 0; i < Math.max(8, Math.floor(runs / 6)); i++) {
   const dropped = page.sanitizeData(clone(page.data));
   if ("Ivan" in (dropped.days["2026-11-25"] ? dropped.days["2026-11-25"].ovr : {})) { /* dropRemoved runs on merge; sanitize keeps the plan as saved */ }
 }
+// Sync dates from the sheet: the chosen nights lose their edits (and the covers when asked), the others and Saturdays are left, and what was there comes back
+{
+  const page = loadPage(NOW);
+  page.data = Object.assign(page.data, clone(fixturePlan())); page.data.pin = "x";
+  page.data.days["2026-11-25"] = { v: 2, ovr: { Ivan: { brk: 18 } } }; page.data.days["2026-11-26"] = { v: 2, ovr: { Ivan: { brk: 18 } } };
+  page.data.lateCover["2026-11-25"] = { vip: "Raza" };
+  const before = page.resetNightsToSheet(["2026-11-25"], false);
+  totals.syncDates = (totals.syncDates || 0) + 1;
+  if (page.data.days["2026-11-25"] || !page.data.days["2026-11-26"] || !page.data.lateCover["2026-11-25"] || !before.days["2026-11-25"]) bad.push("sync dates: only the chosen night should lose its edits, covers kept by default");
+  page.resetNightsToSheet(["2026-11-25"], true);
+  if (page.data.lateCover["2026-11-25"]) bad.push("sync dates: covers should be removed when asked");
+}
 // the Phase 1 / Support Line tab: the page's reader and the worker's read the same blocks, hours and break rotations
 {
   const page = loadPage(NOW);
