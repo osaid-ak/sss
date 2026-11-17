@@ -45,9 +45,9 @@ for (let i = 0; i < runs; i++) {
   page.scenarioSaved = savedScenario;
   applyScenario(page, seed, opts, base);
   const label0 = base + " #" + seed + " " + JSON.stringify(opts);
-  const displayOf = () => { const m = {}; for (let n = 0; n < 70; n++) { const k = addDays(base, n); const d = page.resolveDay(k); m[k] = d.people.map(p => [p.name, p.start, p.len, p.brk, JSON.stringify(p.split || null), page.queueFromRoles(page.rolesOf(p))].join()).join("|") + "#" + (d.lineBars || []).map(b => b.owner + b.start + b.len).sort().join(); } return m; };
+  const displayOf = () => { const m = {}; for (let n = 0; n < 70; n++) { const k = addDays(base, n); const d = page.resolveDay(k); const cv = page.data.lateCover[k] || {}; m[k] = d.people.filter(p => p.name !== cv.vip && p.name !== cv.phase1).map(p => [p.name, p.start, p.len, p.brk, JSON.stringify(p.split || null), page.queueFromRoles(page.rolesOf(p))].join()).join("|") + "#" + (d.lineBars || []).map(b => b.owner + b.start + b.len).sort().join(); } return m; };
   if (opts.saved || opts.edits) {
-    // nights saved by older versions: what everyone sees must not change when they are converted
+    // nights saved by older versions: what everyone sees must not change when they are converted (except hours pinned for somebody who is late-shift cover that night: the cover decides those)
     const before = displayOf();
     const legacy = Object.keys(page.data.days).filter(k => page.isLegacyDay(k, page.data.days[k])).length;
     page.migrateSavedNights();

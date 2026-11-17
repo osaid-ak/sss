@@ -617,14 +617,14 @@ export function makeEngine(cal, live, nowMs) {
         if (bits.length || prefix) out.push({ name, kind: "change", for: "", what: "", text: "is " + (bits.length ? bits.join(" and ") : "on the same shift") + (prefix ? " (" + prefix + ")" : ""), lo: p.start, hi: p.start + p.len });
       });
     }
-    // the two-week rotation: tagged "(Late Shift)" / "(Phase 1 Coverage)" on screen, not part of the covers list
+    // the two-week rotation: tagged "(Late Shift)" / "(Phase 1)" on screen, not part of the covers list
     const rotation = [];
     if (blk.start) {
       const tch = new Set(Object.keys((nightEdits(key) || { ovr: {} }).ovr));
       day.people.forEach(p => {
         if (day.away.has(p.name) || tch.has(p.name)) return;
         if (blk.late === p.name) rotation.push({ name: p.name, label: "Late Shift", lo: p.start, hi: p.start + p.len });
-        else if (blk.phase1 === p.name) rotation.push({ name: p.name, label: "Phase 1 Coverage", lo: p.start, hi: p.start + p.len });
+        else if (blk.phase1 === p.name) rotation.push({ name: p.name, label: "Phase 1", lo: p.start, hi: p.start + p.len });
       });
     }
     // anyone else working hours other than their original (roster) shift is covering too
