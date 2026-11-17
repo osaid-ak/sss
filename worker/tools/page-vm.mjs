@@ -30,7 +30,7 @@ function stub() {
 
 export function loadPage(nowMs) {
   const html = readFileSync(PAGE_FILE, "utf8");
-  const start = html.indexOf("<script>", html.indexOf('id="coverage-snapshot"')) + "<script>".length;
+  const start = html.indexOf("<script>") + "<script>".length;
   const end = html.lastIndexOf("</script>");
   let js = html.slice(start, end);
   const at = js.lastIndexOf("})();");

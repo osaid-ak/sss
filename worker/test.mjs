@@ -1,5 +1,5 @@
 // Offline checks for the sign-in gate and roles. Run: node test.mjs
-import worker, { PlanStore } from "./src/index.js";
+import worker, { PlanStore, backupsToKeep } from "./src/index.js";
 import { intercomPlan } from "./src/intercom.js";
 import { resolveDates, DateError } from "./src/dates.js";
 import { planCommand, undoCommand } from "./src/commands.js";
@@ -11,11 +11,11 @@ const env = {
   SESSION_SECRET: "test-session-secret-123456",
   ALLOWED_EMAILS: "Ann@Example.com, bob@example.com, cat@example.com, dan@example.com",
   ADMIN_EMAILS: "ann@example.com, dan@example.com",
-  SUPER_ADMIN: "boss@example.com",
+  SUPER_ADMIN: "boss@example.com, Second@Example.com",
   // an in-memory Durable Object, using the real PlanStore class
   PLAN: (() => {
     const mem = new Map();
-    const store = new PlanStore({ storage: { get: async k => mem.get(k), put: async (k, v) => { mem.set(k, v); } } });
+    const store = new PlanStore({ storage: { get: async k => mem.get(k), put: async (k, v) => { mem.set(k, v); }, delete: async ks => { [].concat(ks).forEach(k => mem.delete(k)); }, list: async ({ prefix }) => new Map([...mem].filter(([k]) => k.startsWith(prefix)).sort((x, y) => (x[0] < y[0] ? -1 : 1))) } });
     return { idFromName: n => n, get: () => ({ fetch: (url, init) => store.fetch(new Request(url, init)) }) };
   })(),
   ROLES: { get: async k => kvStore.get(k) || null, put: async (k, v) => { kvStore.set(k, v); } },
@@ -85,6 +85,8 @@ check("allowed email gets a session", ann.res.status === 302 && ann.session);
 check("signed-in user gets the calendar", (await (await get("/", ann.session)).text()).includes("CALENDAR"));
 const bob = await signIn("bob@example.com");
 const boss = await signIn("boss@example.com");
+const second = await signIn("second@example.com");
+check("a second Super Admin in the list is a Super Admin too", (await (await get("/api/me", second.session)).json()).role === "super");
 check("Super Admin signs in without being in ALLOWED_EMAILS", boss.session);
 check("starting roles: admin, member, super", (await (await get("/api/me", ann.session)).json()).role === "admin" &&
   (await (await get("/api/me", bob.session)).json()).role === "member" && (await (await get("/api/me", boss.session)).json()).role === "super");
@@ -94,6 +96,30 @@ const planDoc = { version: 1, updatedAt: "2026-11-13T10:00:00.000Z", parts: 1, c
 check("a signed-in member can save the plan", (await putPlan(bob.session, planDoc)).status === 200);
 check("the plan comes back exactly as saved", JSON.stringify(await (await get("/api/team/plan", ann.session)).json()) === JSON.stringify(planDoc));
 check("a second save replaces the first", (await putPlan(ann.session, Object.assign({}, planDoc, { updatedAt: "2026-11-13T11:00:00.000Z" }))).status === 200 && (await (await get("/api/team/plan", bob.session)).json()).updatedAt === "2026-11-13T11:00:00.000Z");
+// server-side backups: the plan as it was is kept before a save replaces it (at most one every 30 minutes), for admins to read
+{
+  const l = await (await get("/api/backups", ann.session)).json();
+  check("backups: the first overwrite kept the plan as it was", Array.isArray(l.backups) && l.backups.length === 1 && l.backups[0].size > 10);
+  const one = await get("/api/backups/" + l.backups[0].id, ann.session);
+  check("backups: a backup can be read and is the earlier plan", one.status === 200 && (await one.json()).updatedAt === "2026-11-13T10:00:00.000Z");
+  await putPlan(ann.session, Object.assign({}, planDoc, { updatedAt: "2026-11-13T12:00:00.000Z" }));
+  check("backups: a second save within 30 minutes adds none", (await (await get("/api/backups", ann.session)).json()).backups.length === 1);
+  check("backups: members cannot read them", (await get("/api/backups", bob.session)).status === 403 && (await get("/api/backups/" + l.backups[0].id, bob.session)).status === 403);
+  {
+    const p1 = await (await post("/api/presence", ann.session, { tab: "t1", state: "active" })).json();
+    const p2 = await (await post("/api/presence", bob.session, { tab: "t2", state: "idle" })).json();
+    const p3 = await (await post("/api/presence", bob.session, { tab: "t3", state: "active" })).json();
+    check("presence: lists who is here with names, active first", p1.people.length === 1 && p1.people[0].name === "Ann" && p2.people.length === 2 && p2.people[0].state === "active" && p2.people[1].name === "Bob" && p2.people[1].state === "idle");
+    check("presence: two tabs of one person count once and active wins", p3.people.length === 2 && p3.people.find(x => x.email === "bob@example.com").state === "active");
+    const p4 = await (await post("/api/presence", bob.session, { tab: "t3", state: "gone" })).json();
+    check("presence: a closed tab leaves, signed-out is 401, GET is refused", p4.people.find(x => x.email === "bob@example.com").state === "idle" && (await post("/api/presence", null, {})).status === 401 && (await get("/api/presence", ann.session)).status === 405);
+  }
+  check("backups: a bad id is refused and signed-out is 401", (await get("/api/backups/abc", ann.session)).status === 400 && (await get("/api/backups")).status === 401);
+  const now = Date.parse("2026-11-20T12:00:00Z"), H = 3600000;
+  const keys = [0.5, 3, 25, 26, 49, 50, 24 * 15].map(h => "bk:" + String(now - h * H).padStart(13, "0"));
+  const keep = backupsToKeep(keys, now);
+  check("backups: everything from the last day is kept, then the earliest of each day for 14 days, older is dropped", keep.has(keys[0]) && keep.has(keys[1]) && !keep.has(keys[2]) && keep.has(keys[3]) && !keep.has(keys[4]) && keep.has(keys[5]) && !keep.has(keys[6]));
+}
 check("text that is not JSON is refused", (await putPlan(bob.session, "not json")).status === 400);
 check("JSON that is not a plan is refused", (await putPlan(bob.session, { hello: "world" })).status === 400);
 check("the old part-by-part paths no longer exist", (await get("/api/team/plan/part/0", bob.session)).status === 404);
@@ -108,7 +134,7 @@ check("unverified Google email is denied", (await signIn("ann@example.com", fals
 check("member cannot list users", (await get("/api/users", bob.session)).status === 403);
 check("member cannot change roles", (await post("/api/users", bob.session, { email: "cat@example.com", role: "admin" })).status === 403);
 let j = await (await get("/api/users", ann.session)).json();
-check("admin sees everyone, Super Admin first", j.users.length === 5 && j.users[0].email === "boss@example.com" && j.users[0].role === "super");
+check("admin sees everyone, Super Admin first", j.users.length === 6 && j.users[0].email === "boss@example.com" && j.users[0].role === "super");
 j = await (await post("/api/users", ann.session, { email: "cat@example.com", role: "admin" })).json();
 check("admin can promote a member", j.ok && j.users.find(u => u.email === "cat@example.com").role === "admin");
 check("promoted member is now an admin", (await (await get("/api/me", (await signIn("cat@example.com")).session)).json()).role === "admin");

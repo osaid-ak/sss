@@ -7,6 +7,7 @@
 //   /api/me         who am I and my role
 //   /api/users      Admins: list people (GET) / add, remove, change a role (POST)
 //   /api/log        Admins: recent sign-ins, sign-outs and user changes
+//   /api/backups    Admins: the server-side backups of the shared plan (list, and one by id)
 //   /api/team/plan the shared team plan, kept in a Durable Object (signed-in people only)
 //   /api/v1/*      read-only calls for automations, with an API key instead of a Google sign-in (see automationApi)
 //   /api/v1/calendar/*  commands that change the calendar (preview, apply, undo), with a WRITE key and the person who asked (see calendarApi)
@@ -16,7 +17,7 @@
 //   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SESSION_SECRET
 //   ALLOWED_EMAILS  comma-separated: everyone who may sign in
 //   ADMIN_EMAILS    comma-separated: who starts as an Admin (everyone else starts as a Member)
-//   SUPER_ADMIN     one email: always allowed, always the Super Admin, can change Admins' roles
+//   SUPER_ADMIN     one or more emails, comma separated: always allowed, always the Super Admin, can change Admins' roles
 //   WRITE_KEYS      the same format, for the Slack /calendar bot only: a read key can never write, and a write key is not accepted for reading
 //   API_KEYS        comma-separated label:key pairs for automations, e.g. intercom:<long random string> (one label per automation, so one can be revoked alone)
 // Role changes, added people and removed people made in the app are kept in the ROLES key-value store. Roles win over ADMIN_EMAILS.
@@ -26,6 +27,7 @@ import { intercomPlan, shiftDayAt, validDate } from "./intercom.js";
 import { readSheetsLive } from "./sheets.js";
 import { planCommand, undoCommand } from "./commands.js";
 import { slotLabel } from "./covers.js";
+import { LOGO_DATA, POWERED_DATA } from "./logo.js";
 
 const SESSION_COOKIE = "sss_session";
 const STATE_COOKIE = "sss_state";
@@ -75,7 +77,8 @@ function cookie(name, value, maxAge) {
 function emailList(value) {
   return String(value || "").split(",").map(x => x.trim().toLowerCase()).filter(Boolean);
 }
-function superEmail(env) { return String(env.SUPER_ADMIN || "").trim().toLowerCase(); }
+function superEmails(env) { return emailList(env.SUPER_ADMIN); }
+function isSuper(env, email) { return superEmails(env).includes(String(email || "").trim().toLowerCase()); }
 // People added or removed from the app are kept in the ROLES store, on top of the ALLOWED_EMAILS secret.
 async function storedUsers(env) {
   if (!env.ROLES) return { added: [], removed: [] };
@@ -88,7 +91,7 @@ async function accessSet(env, users) {
   const u = users || await storedUsers(env);
   const set = new Set([...emailList(env.ALLOWED_EMAILS), ...u.added.map(x => String(x).toLowerCase())]);
   u.removed.forEach(x => set.delete(String(x).toLowerCase()));
-  if (superEmail(env)) set.add(superEmail(env));
+  superEmails(env).forEach(x => set.add(x));
   return set;
 }
 async function isAllowed(env, email) {
@@ -102,7 +105,7 @@ async function storedRoles(env) {
 // "super", "admin" or "member"
 async function roleOf(env, email, stored) {
   const e = String(email).trim().toLowerCase();
-  if (e === superEmail(env)) return "super";
+  if (isSuper(env, e)) return "super";
   const roles = stored || await storedRoles(env);
   if (roles[e] === "admin") return "admin";
   if (roles[e] === "member") return "member";
@@ -301,14 +304,14 @@ async function logEndedSession(env, request, email) {
 const HEADERS = { "Cache-Control": "private, no-store", "X-Robots-Tag": "noindex, nofollow" };
 function page(title, body, status) {
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">` +
-    `<title>${title}</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#080b10;color:#eef3f8;font:16px system-ui,sans-serif}` +
-    `main{max-width:380px;padding:32px;text-align:center}h1{font-size:22px;margin:0 0 8px}p{color:#8b96a8;margin:0 0 20px;line-height:1.5}` +
-    `a.btn{display:inline-block;background:#34d399;color:#06241d;font-weight:700;text-decoration:none;padding:10px 18px;border-radius:999px}</style></head>` +
+    `<title>${title}</title><style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#080b10;color:#eef3f8;font:16px system-ui,sans-serif}` +
+    `main{width:min(380px,100%);box-sizing:border-box;padding:32px;text-align:center}img.powered{display:block;margin:12px auto 0;width:128px;height:auto;opacity:.9;position:relative;left:72px}h1{font-size:22px;margin:0 0 8px}img.logo{display:block;margin:0 auto;width:min(300px,100%);height:auto}p{color:#8b96a8;margin:0 0 20px;line-height:1.5}` +
+    `a.btn{display:inline-block;background:#ff3131;color:#fff;font-weight:700;text-decoration:none;padding:10px 18px;border-radius:999px}</style></head>` +
     `<body><main>${body}</main></body></html>`;
   return new Response(html, { status: status || 200, headers: Object.assign({ "Content-Type": "text/html; charset=utf-8" }, HEADERS) });
 }
 function landing() {
-  return page("Support Orbit", `<h1>Support Orbit</h1><p>Sign in with your Google account to open the calendar.</p><a class="btn" href="/auth/login">Sign in with Google</a>`, 200);
+  return page("Support Orbit", `<h1><img class="logo" alt="Support Orbit" src="${LOGO_DATA}"></h1><p>Everything is auto, mate! &#128521;</p><a class="btn" href="/auth/login">Sign in with Google</a><img class="powered" alt="Powered by" src="${POWERED_DATA}">`, 200);
 }
 function denied() {
   return page("Not allowed", `<h1>Not allowed</h1><p>This Google account does not have access to the calendar. Ask a lead to add your email.</p><a class="btn" href="/auth/login">Try another account</a>`, 403);
@@ -437,8 +440,52 @@ async function userAction(request, env, actorEmail) {
 // The shared plan lives in one Durable Object, so there is a single strongly consistent copy: no third-party store to go down and
 // no public address to protect. It holds the plan document exactly as the page sends it (plan plus its last-edit time).
 const PLAN_MAX = 1900000;
+// Server-side backups of the shared plan. Before a save replaces the plan, the plan as it was is kept (at most one copy per BACKUP_GAP_MS), so a bad
+// import, a restore or a stale browser can always be undone. Every copy of the last 24 hours is kept, then the first of each day for 14 days.
+const BACKUP_GAP_MS = 30 * 60 * 1000;
+const BACKUP_DAY_MS = 24 * 3600 * 1000;
+const BACKUP_DAYS = 14;
+export function backupsToKeep(keys, now) {
+  const keep = new Set(), seenDay = new Set();
+  keys.slice().sort().forEach(k => {
+    const at = Number(k.slice(3)), age = now - at;
+    if (age < BACKUP_DAY_MS) { keep.add(k); return; }
+    const day = Math.floor(at / BACKUP_DAY_MS);
+    if (age < BACKUP_DAYS * BACKUP_DAY_MS && !seenDay.has(day)) { seenDay.add(day); keep.add(k); }
+  });
+  return keep;
+}
+// Who has the calendar open right now (kept in memory only; a browser says so every 20 seconds and an entry that goes quiet drops off).
+const PRESENCE_TTL_MS = 100 * 1000;
 export class PlanStore {
-  constructor(state) { this.state = state; }
+  constructor(state) { this.state = state; this.presence = new Map(); }
+  // One entry per open tab; a person with several tabs counts as active if any of them is.
+  beat(email, tab, state, now) {
+    for (const [k, v] of this.presence) if (now - v.at > PRESENCE_TTL_MS) this.presence.delete(k);
+    const key = email + "|" + tab;
+    if (state === "gone") this.presence.delete(key);
+    else if (this.presence.size < 500) this.presence.set(key, { email, state: state === "idle" ? "idle" : "active", at: now });
+    const by = new Map();
+    for (const v of this.presence.values()) {
+      const cur = by.get(v.email);
+      if (!cur || (cur.state === "idle" && v.state === "active")) by.set(v.email, { email: v.email, state: v.state });
+    }
+    return [...by.values()].sort((x, y) => (x.state === y.state ? x.email.localeCompare(y.email) : x.state === "active" ? -1 : 1));
+  }
+  async backUp(prev, body) {
+    try {
+      if (!prev || prev === body) return;
+      const now = Date.now();
+      const last = Number(await this.state.storage.get("bk-last")) || 0;
+      if (now - last < BACKUP_GAP_MS) return;
+      await this.state.storage.put("bk:" + String(now).padStart(13, "0"), prev);
+      await this.state.storage.put("bk-last", String(now));
+      const all = [...(await this.state.storage.list({ prefix: "bk:" })).keys()];
+      const keep = backupsToKeep(all, now);
+      const drop = all.filter(k => !keep.has(k));
+      if (drop.length) await this.state.storage.delete(drop);
+    } catch (e) { /* a backup problem never stops a save */ }
+  }
   async fetch(request) {
     const headers = { "Content-Type": "application/json" };
     const path = new URL(request.url).pathname;
@@ -455,6 +502,21 @@ export class PlanStore {
       }
       return new Response("Method not allowed", { status: 405 });
     }
+    if (path === "/presence" && request.method === "POST") {
+      let o = {};
+      try { o = JSON.parse(await request.text()); } catch (e) { o = {}; }
+      const people = this.beat(String(o.email || "").toLowerCase(), String(o.tab || "").slice(0, 40), String(o.state || ""), Date.now());
+      return new Response(JSON.stringify({ people }), { headers });
+    }
+    if (path === "/backups" && request.method === "GET") {
+      const out = [];
+      for (const [k, v] of await this.state.storage.list({ prefix: "bk:" })) out.push({ id: k.slice(3), at: new Date(Number(k.slice(3))).toISOString(), size: String(v).length });
+      return new Response(JSON.stringify({ backups: out.reverse() }), { headers });
+    }
+    if (path.startsWith("/backup/") && request.method === "GET") {
+      const v = await this.state.storage.get("bk:" + path.slice(8));
+      return v ? new Response(v, { headers }) : new Response('{"error":"none"}', { status: 404, headers });
+    }
     if (request.method === "GET") {
       const doc = await this.state.storage.get("doc");
       return doc ? new Response(doc, { headers }) : new Response('{"error":"no plan yet"}', { status: 404, headers });
@@ -463,12 +525,13 @@ export class PlanStore {
       const body = await request.text();
       // a write that says which version it was made from is refused when the plan has moved on (the caller reads again and retries)
       const expect = request.headers.get("X-Expect-Updated-At");
+      const cur = await this.state.storage.get("doc");
       if (expect !== null) {
-        const cur = await this.state.storage.get("doc");
         let curAt = "";
         try { curAt = JSON.parse(cur).updatedAt; } catch (e) { curAt = ""; }
         if (curAt !== expect) return new Response('{"error":"the plan changed"}', { status: 409, headers });
       }
+      await this.backUp(cur, body);
       await this.state.storage.put("doc", body);
       return new Response('{"ok":true}', { headers });
     }
@@ -707,6 +770,16 @@ export default {
       const origin = request.headers.get("Origin");
       if (request.method !== "GET" && origin && origin !== url.origin) return json({ error: "bad origin" }, 403);
       if (path === "/api/me") return json({ email, role: await roleOf(env, email) });
+      if (path === "/api/presence") {
+        if (request.method !== "POST" || !env.PLAN) return json({ error: "method not allowed" }, 405);
+        let o = {};
+        try { o = JSON.parse(await request.text()); } catch (e) { o = {}; }
+        const got = await env.PLAN.get(env.PLAN.idFromName("plan")).fetch("https://plan.internal/presence", {
+          method: "POST", body: JSON.stringify({ email, tab: o.tab, state: o.state })
+        });
+        const data = await got.json();
+        return json({ people: (data.people || []).map(p => ({ name: displayName(p.email), email: p.email, state: p.state })) });
+      }
       if (path === "/api/users") {
         const role = await roleOf(env, email);
         if (role !== "admin" && role !== "super") return json({ error: "admins only" }, 403);
@@ -720,6 +793,16 @@ export default {
         let list = [];
         if (env.ROLES) { try { list = JSON.parse((await env.ROLES.get("log")) || "[]") || []; } catch (e) { list = []; } }
         return json({ log: list.slice().reverse(), kept: LOG_KEEP });
+      }
+      if (path === "/api/backups" || path.startsWith("/api/backups/")) {
+        const role = await roleOf(env, email);
+        if (role !== "admin" && role !== "super") return json({ error: "admins only" }, 403);
+        if (request.method !== "GET" || !env.PLAN) return json({ error: "method not allowed" }, 405);
+        const id = path.slice("/api/backups".length).replace(/^\//, "");
+        if (id && !/^\d{13}$/.test(id)) return json({ error: "not a backup" }, 400);
+        const got = await env.PLAN.get(env.PLAN.idFromName("plan")).fetch("https://plan.internal/" + (id ? "backup/" + id : "backups"), { method: "GET" });
+        const h = new Headers(HEADERS); h.set("Content-Type", "application/json");
+        return new Response(got.body, { status: got.status, headers: h });
       }
       if (path.startsWith("/api/team/")) return planStore(request, env, path.slice("/api/team/".length), email);
       return new Response("Not found", { status: 404, headers: HEADERS });
