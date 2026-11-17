@@ -23,7 +23,7 @@ export function fixturePlan() {
   for (let i = 0; i < 20; i++) {
     const start = new Date(Date.UTC(2026, 8, 28) + 28 * 86400000 * i);
     const end = new Date(start.getTime() + 25 * 86400000);
-    line.push({ start: key(start), end: key(end), slots: [lineNames[i % 4], lineNames[(i + 1) % 4], lineNames[(i + 2) % 4]], backup: lineNames[(i + 3) % 4] });
+    line.push({ start: key(start), end: key(end), slots: [lineNames[i % 4], lineNames[(i + 1) % 4], lineNames[(i + 2) % 4]], backup: lineNames[(i + 3) % 4], breaks: { Zunair: 10 + (i % 3) * 2, Laraib: 14, Qasim: 16 + (i % 2) * 2, Ayeshah: 16 } });
   }
   return {
     version: 1, slotOrigin: 900, people, lineBars: [], leaves: [], holidays: [], removed: [], days: {}, lateCover: {}, changes: {}, dst: false,

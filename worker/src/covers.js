@@ -230,6 +230,11 @@ export function makeEngine(cal, live, nowMs) {
     });
     const rot = lineRotationFor(key);
     if (!rot) return;
+    // the block's break rotation (a break that does not clash with anyone's Support Line duty), for the people it lists
+    Object.keys(rot.breaks || {}).forEach(name => {
+      const p = people.find(x => x.name === name), b = rot.breaks[name];
+      if (p && Number.isFinite(b) && b >= p.start && b <= p.start + p.len - BRK_LEN) p.brk = b;
+    });
     const bars = [];
     rot.slots.forEach((owner, i) => {
       const p = owner && people.find(x => x.name === owner);
@@ -255,11 +260,10 @@ export function makeEngine(cal, live, nowMs) {
       }
     });
   }
-  // ---- Saved nights (the page's firstFollowKey / personDiff / applyEdits / buildNight / nightEdits / legacyEdits / rotationNames)
+  // ---- Saved nights (the page's personDiff / applyEdits / buildNight / nightEdits / legacyEdits / rotationNames)
   // A saved weekday is { v: 2, ovr: { name: { start, len, brk, split, roles, c } }, lines } (only what a lead changed on it) or, from older versions, a whole
   // snapshot ({ people, lineBars, baked, touched, rot }), which is read through legacyEdits. The night is built like any other night and the overrides
   // are applied last, so everything a lead did not edit follows the sheet.
-  const firstFollowKey = (() => { const a = nightAnchorKey(nowMs); const wd = weekdayOf(a); return addDaysK(a, 7 - (wd === 0 ? 6 : wd - 1)); })();
   const isLegacyDay = (key, d) => !!d && Array.isArray(d.people) && !d.weekendCover && !isSaturday(key);
   const barKey = b => b.owner + "|" + b.start + "|" + b.len;
   function sameBars(a, b) {
@@ -326,12 +330,11 @@ export function makeEngine(cal, live, nowMs) {
     return isLegacyDay(key, d) ? legacyEdits(key, d) : { ovr: d.ovr || {}, lines: d.lines || null };
   }
   function legacyEdits(key, d) {
-    const follow = key >= firstFollowKey;
     const baked = new Set(d.baked || []);
     const usual = buildNight(key, null, { onlyChanges: baked });
     const touched = new Set(d.touched || []);
     changesFor(key).forEach(c => { if (baked.has(c.id)) [c.name, c.from, c.a, c.b].forEach(n => { if (n) touched.add(n); }); });
-    const rot = follow ? rotationNames(key, d) : new Set();
+    const rot = rotationNames(key, d);
     const ovr = {};
     d.people.forEach(p => {
       const b = usual.people.find(x => x.name === p.name);
@@ -344,7 +347,7 @@ export function makeEngine(cal, live, nowMs) {
       }
       ovr[p.name] = diff;
     });
-    const lines = !follow && Array.isArray(d.lineBars) && !sameBars(d.lineBars, usual.lineBars) ? plainBars(d.lineBars) : null;
+    const lines = touched.size && Array.isArray(d.lineBars) && !sameBars(d.lineBars, usual.lineBars) ? plainBars(d.lineBars) : null;
     return { ovr, lines };
   }
   function rotationNames(key, day) {
@@ -619,7 +622,10 @@ export function makeEngine(cal, live, nowMs) {
       if (day.away.has(p.name) || out.some(e => e.name === p.name) || rotation.some(e => e.name === p.name)) return;
       const usual = roster.find(x => x.name === p.name);
       if (!usual || (p.start === usual.start + shift && p.len === usual.len)) return;
-      out.push({ name: p.name, kind: "hours", for: "", what: "", text: "is working " + span(p.start, p.len) + " instead of their usual " + span(usual.start + shift, usual.len), lo: p.start, hi: p.start + p.len });
+      // exactly the usual shift of somebody who is away, in the same queue: that is who they are covering
+      const away = roster.filter(q => q.name !== p.name && day.away.has(q.name) && q.start + shift === p.start && q.len === p.len && queueFromRoles(rolesOf(q)) === queueFromRoles(rolesOf(p))).map(q => q.name);
+      const instead = "working " + span(p.start, p.len) + " instead of their usual " + span(usual.start + shift, usual.len);
+      out.push({ name: p.name, kind: "hours", for: away.join(", "), what: "", text: away.length ? "is covering " + away.join(", ") + ": " + instead : "is " + instead, lo: p.start, hi: p.start + p.len });
     });
     return { covers: out, rotation };
   }

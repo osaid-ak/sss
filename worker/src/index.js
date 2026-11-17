@@ -237,7 +237,7 @@ function planChanges(prev, next, limit) {
   const isSat = key => /^\d{4}-\d{2}-\d{2}$/.test(key) && new Date(key + "T00:00:00Z").getUTCDay() === 6;
   // Saved weekdays are stored as what was edited on them (ovr, lines) or, by older versions, as whole snapshots (people, lineBars). The first save of
   // the new format converts every saved night at once: that is one line, not an edit per night.
-  const upgraded = next.schema === 2 && prev.schema !== 2;
+  const upgraded = (next.schema || 0) > (prev.schema || 0);
   if (upgraded) out.push("Saved nights upgraded: each now keeps only what was edited on it, everything else follows the sheet");
   const shape = d => [d.people, d.lineBars, d.ovr, d.lines];
   [...new Set([...Object.keys(pd), ...Object.keys(nd)])].sort().forEach(key => {

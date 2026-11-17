@@ -263,7 +263,7 @@ const apiCal = {
   vipPlan: { blocks: [{ start: "2026-11-16", end: "2026-11-27", late: "Ammana", phase1: "Raza", cover1: "", cover2: "" }], readAt: "2026-11-14T08:00:00.000Z" },
   // Tue 17: a lead edited the day and moved Ivan to Phase 1 (Raza is the rotation's Phase 1 person, so he is normal)
   days: {
-    "2026-11-17": { people: [rp("Raza", { roles: { phase1: true } }), rp("Ivan", { roles: { phase1: true } }), rp("Ammana"), rp("Ayeshah", { roles: { phase1: true } })], lineBars: [] },
+    "2026-11-17": { v: 2, ovr: { Ivan: { roles: { lead: false, phase1: true, vip: false, line: false } } } },
     // Sat 21: weekend cover names Ivan for Phase 1
     "2026-11-21": { people: [], lineBars: [], weekendCover: { phase1: "Ivan", vip: ["Raza", "Osaid"] } }
   },
@@ -329,7 +329,7 @@ const liveDay = d => liveBody.days.find(x => x.date === d);
 check("the sheet is read live on every call and the answer says so", sheetCalls === 3 && liveBody.sources.weekendCover === "sheet" && liveBody.sources.rotation === "sheet");
 check("live rotation: Monday's rotation person is the sheet's (Ivan), not the stored copy's (Raza)", liveDay("2026-11-16").rotationPhase1 === "Ivan");
 check("live weekend names win over the stored ones", liveDay("2026-11-21").decisions.map(d => d.name + ":" + d.queue).join(",") === "Ammana:phase1,Ivan:vip,Osaid:vip" && liveDay("2026-11-21").rotationPhase1 === "Ivan");
-check("an edited day is judged against the live rotation (Raza is no longer the Phase 1 person)", liveDay("2026-11-17").decisions.map(d => d.name).join(",") === "Raza");
+check("an edited night is judged against the live rotation: only what was edited stays, so with Ivan now the Phase 1 person nothing on Tuesday is a decision", liveDay("2026-11-17").decisions.length === 0);
 sheetMock = url => (url.includes("gid=1806071421") ? new Response("/*O_o*/\ngoogle.visualization.Query.setResponse(" + JSON.stringify(weekendTable) + ");") : new Response("down", { status: 500 }));
 const half = await (await keyed("/api/v1/intercom-plan?from=2026-11-16&days=8", "key-for-intercom-123")).json();
 check("one tab unreadable: that tab falls back to the stored copy and the answer says which", half.sources.weekendCover === "sheet" && half.sources.rotation === "stored" && half.days.find(d => d.date === "2026-11-16").rotationPhase1 === "Raza");
@@ -378,7 +378,7 @@ const staleThisWeek = followCal({ "2026-11-19": { people: savedPeople("Ivan"), l
 const legacyNext = followCal({ "2026-11-25": { people: savedPeople("Ivan"), lineBars: [] } });
 check("saved night next week: the sheet's Phase 1 person is on Phase 1 and the old rotation person goes back to their roster queue", queuesOn(staleNext, "2026-11-25").Jawad === "phase1" && queuesOn(staleNext, "2026-11-25").Ivan === "vip");
 check("saved night next week: a person edited directly (touched) stays as edited while the sheet's Phase 1 person still follows", queuesOn(staleNextEdited, "2026-11-25").Ivan === "phase1" && queuesOn(staleNextEdited, "2026-11-25").Jawad === "phase1");
-check("saved night this week is left exactly as saved", queuesOn(staleThisWeek, "2026-11-19").Ivan === "phase1" && queuesOn(staleThisWeek, "2026-11-19").Jawad === "vip");
+check("saved night this week follows the sheet as well", queuesOn(staleThisWeek, "2026-11-19").Ivan === "vip" && queuesOn(staleThisWeek, "2026-11-19").Jawad === "phase1");
 check("a night saved before the rotation was recorded: whoever sits on Phase 1 against their roster queue is taken to be the old rotation", queuesOn(legacyNext, "2026-11-25").Ivan === "vip" && queuesOn(legacyNext, "2026-11-25").Jawad === "phase1");
 // the original shifts at the top of the VIP Coverage Plan tab go into the roster, as the page does (Ivan's 11pm break on the sheet, 12am in the stale roster)
 const vipRowsLive = { vipRows: [[], ["", "", "", "Ammana", "Ivan"], ["", "", "", "7PM - 4AM", "7PM - 4AM"], ["", "", "", "7PM - 4AM", "7PM - 4AM"], ["", "", "", "11 - 12", "11 - 12"]] };
@@ -391,6 +391,19 @@ const zOn = cal => makeEngine(cal, null, Date.parse("2026-11-16T10:00:00Z")).res
 const zCovered = zOn(editedCal({ "2026-11-25": { vip: "Zarminay" } })), zFree = zOn(editedCal({}));
 check("an edited night: the edited break stays, and with the late cover removed the person is back on their own hours", zCovered.start === 15 && zCovered.brk === 22 && zFree.start === 6 && zFree.brk === 22);
 check("a night with nothing edited on it is the night as the sheet gives it", JSON.stringify(makeEngine(Object.assign({}, coverCal, { days: { "2026-11-25": { v: 2, ovr: {} } } }), null, Date.parse("2026-11-16T10:00:00Z")).resolveDay("2026-11-25").people) === JSON.stringify(makeEngine(coverCal, null, Date.parse("2026-11-16T10:00:00Z")).resolveDay("2026-11-25").people));
+// the Break Rotations columns of the Phase 1 / Support Line tab: each four-week block lists a break for Zunair, Laraib, Qasim and Ayeshah, read inside their shifts
+const brRows = [
+  ["", "", "", "Qasim", "Ayeshah", "Schanzae", "Jawad"], ["", "", "", "7PM - 4AM", "8PM - 5AM", "LATE SHIFT", "8PM - 5AM"], ["", "", "", "7PM - 4AM", "8PM - 5AM", "LATE SHIFT", "8PM - 5AM"], ["", "", "", "12 - 1", "12 - 1", "2 - 3", "12 - 1"],
+  ["", "", "", "PLANNED COVER", "", "", "BACKUP", "BREAK ROTATIONS"], ["", "", "", "6 - 10", "10 - 1", "1 - 4", "", "Zunair", "Laraib", "Qasim", "Ayeshah"],
+  ["2", "Nov 2, 26", "Nov 27, 26", "Laraib", "Zunair", "Ayeshah", "Qasim", "9 - 10", "11 - 12", "12 - 1", "12 - 1"],
+  ["3", "Nov 30, 26", "Dec 25, 26", "Zunair", "Qasim", "Ayeshah", "Laraib", "10 - 11", "11 - 12", "1 - 2", "12 - 1"]
+];
+const brRoster = ["Qasim", "Ayeshah", "Zunair", "Laraib", "Schanzae", "Jawad"].map(n => CP(n, { roles: { phase1: true }, queue: "phase1", group: "Phase 1" }));
+const brTab = parseSheetTab(brRows, brRoster, 2);
+check("break rotations: each block carries the listed people's breaks on the summer schedule", brTab.line.length === 2 && JSON.stringify(brTab.line[1].breaks) === JSON.stringify({ Zunair: 12, Laraib: 14, Qasim: 18, Ayeshah: 16 }) && JSON.stringify(brTab.line[0].breaks) === JSON.stringify({ Zunair: 10, Laraib: 14, Qasim: 16, Ayeshah: 16 }), JSON.stringify(brTab.line.map(l => l.breaks)));
+const brCal = { people: brRoster.map(p => JSON.parse(JSON.stringify(p))), vipPlan: { blocks: [], readAt: "x" }, leaves: [], holidays: [], lateCover: {}, days: {}, changes: {}, lineBars: [], sheetPlan: { hours: {}, line: brTab.line, readAt: "x" } };
+const brOn = (date, name) => makeEngine(brCal, null, Date.parse("2026-11-16T10:00:00Z")).resolveDay(date).people.find(p => p.name === name);
+check("break rotations: on the nights of a block the listed people break when the sheet says (10pm for Zunair, 1am for Qasim from 30 Nov; 9pm for Zunair before)", slotLabel(brOn("2026-12-02", "Zunair").brk) === "10pm" && slotLabel(brOn("2026-12-02", "Qasim").brk) === "1am" && slotLabel(brOn("2026-11-18", "Zunair").brk) === "9pm", [brOn("2026-12-02", "Zunair").brk, brOn("2026-12-02", "Qasim").brk, brOn("2026-11-18", "Zunair").brk].join());
 // nobody on the Support Line for a stretch is a need for a lead
 const lineCal = { people: [CP("Solo", { roles: { vip: true, line: true } })], vipPlan: { blocks: [], readAt: "x" }, leaves: [], holidays: [], lateCover: {}, days: {}, changes: {}, lineBars: [{ owner: "Solo", start: 6, len: 8 }], sheetPlan: { hours: {}, line: [], readAt: "x" } };
 const lineDay = intercomPlan({ updatedAt: "x", calendar: lineCal }, "2026-11-17", 1, Date.parse("2026-11-16T10:00:00Z"), { live: null, emails: [] }).days[0];
@@ -467,7 +480,8 @@ check("command: ...and the calendar API then says Jawad is off and the Phase 1 n
 const both = cmd([{ op: "off", people: ["jawad"], dates: "today" }, { op: "takeover", name: "raza", from: "jawad", dates: "today" }]);
 const bothDay = intercomPlan({ updatedAt: "x", calendar: both.cal }, "2026-11-18", 1, NOW, { live: null, emails: [] }).days[0];
 check("command: 'jawad is off today and raza covers him': Raza works Jawad's 8pm-5am Phase 1 shift, and the 6pm anchor Raza left is an open need that names why", both.ok && bothDay.covers.some(c => c.text === "Raza is covering Jawad on their 8pm–5am Phase 1 shift.") && bothDay.needsCover.some(n => n.text === "Anchor shift 6pm–3am VIP is uncovered. Raza is covering Jawad." ) && bothDay.queues.Raza === "phase1");
-import { makeEngine } from "./src/covers.js";
+import { makeEngine, slotLabel } from "./src/covers.js";
+import { parseSheetTab } from "./src/sheets.js";
 const whole = (cal, name) => { const d = makeEngine(cal, null, NOW).resolveDay("2026-11-18"); return d.people.find(p => p.name === name); };
 const rz = whole(both.cal, "Raza");
 check("command: someone covering takes the covered person's whole shift, break included (Raza's 12 becomes Jawad's 16)", rz.start === whole(both.cal, "Jawad").start && rz.brk === whole(both.cal, "Jawad").brk && rz.brk !== whole(cmdCal, "Raza").brk);

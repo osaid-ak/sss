@@ -224,18 +224,41 @@ export function parseSheetTab(rows, roster, off) {
       originals[r.name] = { start: orig.start, len: orig.len, brk: same ? breakSlot(r.breakText, orig, off) : null };
     }
   });
-  let backupAt = -1;
-  rows.forEach(r => r.forEach((c, j) => { if (backupAt < 0 && /^\s*BACKUP\s*$/i.test(c || "")) backupAt = j; }));
+  let backupAt = -1, breakAt = -1, breakRow = -1;
+  rows.forEach((r, i) => r.forEach((c, j) => {
+    if (backupAt < 0 && /^\s*BACKUP\s*$/i.test(c || "")) backupAt = j;
+    if (breakAt < 0 && /^\s*BREAK ROTATIONS?\s*$/i.test(c || "")) { breakAt = j; breakRow = i; }
+  }));
+  // Break Rotations (the page's parseSheetPlanRows): the next row names the people, each block lists their breaks; read inside the person's shift
+  const breakNames = {};
+  if (breakAt >= 0) {
+    const names = rows[breakRow + 1] || [];
+    for (let j = breakAt; j < names.length; j++) {
+      const nm = matchName(cellAt(names, j), roster);
+      if (nm && roster.some(p => p.name === nm)) breakNames[j] = nm;
+    }
+  }
+  const shiftOf = name => {
+    const h = hours[name] || roster.find(x => x.name === name);
+    return h && Number.isFinite(h.start) && Number.isFinite(h.len) ? { startMin: START_MIN + (h.start + off) * SLOT_MIN, len: h.len } : null;
+  };
   const line = [];
   rows.forEach(r => {
     if (!/^\s*\d+\s*$/.test(r[0] || "")) return;
     const dates = [r[1], r[2]].map(parseAnyDate);
     if (!dates[0] || !dates[1] || dates[1] < dates[0]) return;
     const bk = backupAt >= 0 ? backupAt : 6;
+    const breaks = {};
+    Object.keys(breakNames).forEach(j => {
+      const sh = shiftOf(breakNames[j]);
+      const slot = sh ? breakSlot(cellAt(r, Number(j)), sh, off) : null;
+      if (slot != null) breaks[breakNames[j]] = slot;
+    });
     line.push({
       start: dates[0], end: dates[1],
       slots: [bk - 3, bk - 2, bk - 1].map(j => matchName(cellAt(r, j), roster)),
-      backup: matchName(cellAt(r, bk), roster)
+      backup: matchName(cellAt(r, bk), roster),
+      breaks
     });
   });
   line.sort((a, b) => a.start.localeCompare(b.start));

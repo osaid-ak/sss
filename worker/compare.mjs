@@ -8,6 +8,7 @@ import { savedScenario, flowScenario } from "./tools/saved-scenario.mjs";
 import { rng } from "./tools/scenarios.mjs";
 import { intercomPlan } from "./src/intercom.js";
 import { makeEngine } from "./src/covers.js";
+import { parseSheetTab } from "./src/sheets.js";
 
 if (!pageExists()) { console.log("compare: ../coverage-calendar.html not found, skipped"); process.exit(0); }
 
@@ -127,10 +128,33 @@ for (let i = 0; i < Math.max(8, Math.floor(runs / 6)); i++) {
   if (!Array.isArray(round.days["2026-11-27"].people)) bad.push("storage: an older snapshot should still load");
   const n1 = page.migrateSavedNights(), n2 = page.migrateSavedNights();
   if (n1 !== 1 || n2 !== 0) bad.push("storage: converting should be done once (" + n1 + ", " + n2 + ")");
-  if (page.data.schema !== 2) bad.push("storage: converting should set schema 2");
+  if (page.data.schema !== 3) bad.push("storage: converting should set schema 3");
+  // schema 2 pinned the rotation people and the Support Line bars of this week: schema 3 lets this week follow the sheet too
+  page.data.days["2026-11-17"] = { v: 2, ovr: { Ivan: { start: 8, brk: 12 }, Ashraf: { brk: 20 } }, lines: [{ owner: "Laraib", start: 6, len: 8 }] };
+  page.data.days["2026-11-10"] = { v: 2, ovr: { Ivan: { start: 8, brk: 12 } } };
+  const cleaned = page.reconcileThisWeek();
+  const d17 = page.data.days["2026-11-17"];
+  if (cleaned < 1 || !d17 || d17.ovr.Ivan || !d17.ovr.Ashraf || d17.lines) bad.push("storage: this week should follow the sheet (rotation people and the Support Line bars dropped, other edits kept): " + JSON.stringify(d17));
+  if (!page.data.days["2026-11-10"] || !page.data.days["2026-11-10"].ovr.Ivan) bad.push("storage: a past night is left alone");
   page.data.removed = [{ name: "Ivan", at: "x" }];
   const dropped = page.sanitizeData(clone(page.data));
   if ("Ivan" in (dropped.days["2026-11-25"] ? dropped.days["2026-11-25"].ovr : {})) { /* dropRemoved runs on merge; sanitize keeps the plan as saved */ }
+}
+// the Phase 1 / Support Line tab: the page's reader and the worker's read the same blocks, hours and break rotations
+{
+  const page = loadPage(NOW);
+  page.data = Object.assign(page.data, clone(fixturePlan()));
+  const rows = [
+    ["", "", "", "Qasim", "Ayeshah", "Schanzae", "Jawad"], ["", "", "", "7PM - 4AM", "8PM - 5AM", "LATE SHIFT", "8PM - 5AM"], ["", "", "", "7PM - 4AM", "7PM - 4AM", "LATE SHIFT", "8PM - 5AM"], ["", "", "", "12 - 1", "11 - 12", "2 - 3", "12 - 1"],
+    ["", "", "", "PLANNED COVER", "", "", "BACKUP", "BREAK ROTATIONS"], ["", "", "", "6 - 10", "10 - 1", "1 - 4", "", "Zunair", "Laraib", "Qasim", "Ayeshah"],
+    ["2", "Nov 2, 26", "Nov 27, 26", "Laraib", "Zunair", "Ayeshah", "Qasim", "9 - 10", "11 - 12", "12 - 1", "12 - 1"],
+    ["3", "Nov 30, 26", "Dec 25, 26", "Zunair", "Qasim", "Ayeshah", "Laraib", "10 - 11", "11 - 12", "1 - 2", "12 - 1"],
+    ["4", "Dec 28, 26", "Jan 22, 27", "Laraib", "Qasim", "Ayeshah", "Zunair", "10 - 11", "11 - 12", "3 - 4", "12 - 1"]
+  ];
+  const p = page.parseSheetPlanRows(rows), w = parseSheetTab(rows, page.data.people, 2);
+  totals.sheetParse = (totals.sheetParse || 0) + 1;
+  if (JSON.stringify(p.line) !== JSON.stringify(w.line) || JSON.stringify(p.hours) !== JSON.stringify(w.hours)) bad.push("sheet: the page and the worker read the Phase 1 / Support Line tab differently page=" + JSON.stringify(p.line[1]) + " worker=" + JSON.stringify(w.line[1]));
+  if (!p.line[1] || p.line[1].breaks.Zunair !== 12) bad.push("sheet: break rotation not read: " + JSON.stringify(p.line[1]));
 }
 totals.mismatches = bad.length;
 console.log("compare:", JSON.stringify(totals));
