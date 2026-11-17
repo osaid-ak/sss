@@ -622,7 +622,7 @@ export function makeEngine(cal, live, nowMs) {
     if (blk.start) {
       const tch = new Set(Object.keys((nightEdits(key) || { ovr: {} }).ovr));
       day.people.forEach(p => {
-        if (day.away.has(p.name) || tch.has(p.name)) return;
+        if (tch.has(p.name)) return;
         if (blk.late === p.name) rotation.push({ name: p.name, label: "Late Shift", lo: p.start, hi: p.start + p.len });
         else if (blk.phase1 === p.name) rotation.push({ name: p.name, label: "Phase 1", lo: p.start, hi: p.start + p.len });
       });
