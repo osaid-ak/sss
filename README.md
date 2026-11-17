@@ -6,7 +6,7 @@ Team test copy of the support shift calendar.
 
 https://shift-plan.autoleap-sss.workers.dev/ (sign in with your Google account; only people on the allowed list get in). The old address, https://osaid-ak.github.io/sss/, redirects there.
 
-The header on the site is **Shift Plan**. Setup and roles are in [worker/README.md](worker/README.md).
+The header on the site is **Support Orbit**. Setup and roles are in [worker/README.md](worker/README.md).
 
 ## Weekend Cover
 

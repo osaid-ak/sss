@@ -1,4 +1,4 @@
-// Shift Plan gate: Google sign-in in front of the calendar and the shared plan, with Member / Admin roles.
+// Support Orbit gate: Google sign-in in front of the calendar and the shared plan, with Member / Admin roles.
 //
 // Routes
 //   /auth/login     start "Sign in with Google" (OAuth, email only)
@@ -308,7 +308,7 @@ function page(title, body, status) {
   return new Response(html, { status: status || 200, headers: Object.assign({ "Content-Type": "text/html; charset=utf-8" }, HEADERS) });
 }
 function landing() {
-  return page("Shift Plan", `<h1>Shift Plan</h1><p>Sign in with your Google account to open the calendar.</p><a class="btn" href="/auth/login">Sign in with Google</a>`, 200);
+  return page("Support Orbit", `<h1>Support Orbit</h1><p>Sign in with your Google account to open the calendar.</p><a class="btn" href="/auth/login">Sign in with Google</a>`, 200);
 }
 function denied() {
   return page("Not allowed", `<h1>Not allowed</h1><p>This Google account does not have access to the calendar. Ask a lead to add your email.</p><a class="btn" href="/auth/login">Try another account</a>`, 403);

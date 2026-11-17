@@ -1,4 +1,4 @@
-# Shift Plan sign-in gate (Cloudflare Worker)
+# Support Orbit sign-in gate (Cloudflare Worker)
 
 Puts "Sign in with Google" in front of the calendar and keeps the shared team plan inside the worker, with two roles:
 
