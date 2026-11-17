@@ -335,10 +335,14 @@ export function makeEngine(cal, live, nowMs) {
     const touched = new Set(d.touched || []);
     changesFor(key).forEach(c => { if (baked.has(c.id)) [c.name, c.from, c.a, c.b].forEach(n => { if (n) touched.add(n); }); });
     const rot = rotationNames(key, d);
+    // the late-shift covers a lead added decided those people's hours and queue on that night (they were applied on top of the snapshot), so a
+    // snapshot that still shows them somewhere else is not an edit
+    const cov = lateCoverFor(key) || {};
+    const covered = new Set([cov.vip, cov.phase1].filter(Boolean));
     const ovr = {};
     d.people.forEach(p => {
       const b = usual.people.find(x => x.name === p.name);
-      if (!b) return;
+      if (!b || covered.has(p.name)) return;
       const diff = personDiff(p, b, false);
       if (!diff) return;
       if (!touched.has(p.name)) {
@@ -357,12 +361,19 @@ export function makeEngine(cal, live, nowMs) {
     if (Array.isArray(day.rot)) day.rot.forEach(n => set.add(n));
     else if (Array.isArray(day.people)) {
       const off = dstSlots(key), lateAt = lateStartFor(key);
+      // somebody covering because the block's person is away, or because the holder of an anchor shift moved elsewhere, is a lead's cover, not the rotation
+      const lateGone = !!(blk && blk.late && (isHolidayAway(blk.late, key) || onLeave(blk.late, key)));
+      const p1Gone = !!(blk && blk.phase1 && (isHolidayAway(blk.phase1, key) || onLeave(blk.phase1, key)));
       day.people.forEach(p => {
         const r = roster.find(x => x.name === p.name);
         if (!r) return;
-        const lateHours = p.len === VIP_LATE_LEN && p.start === lateAt;
-        const phase1 = queueFromRoles(rolesOf(p)) === "phase1" && queueFromRoles(rolesOf(r)) !== "phase1";
-        const anchor = ANCHORS.some(a => p.start === a.start + off && p.len === a.len) && !(p.start === r.start + off && p.len === r.len);
+        const q = queueFromRoles(rolesOf(p));
+        const lateHours = p.len === VIP_LATE_LEN && p.start === lateAt && !(lateGone && q === "vip");
+        const phase1 = q === "phase1" && queueFromRoles(rolesOf(r)) !== "phase1" && !p1Gone;
+        const a = ANCHORS.find(x => p.start === x.start + off && p.len === x.len);
+        const holder = a && roster.find(x => x.name !== p.name && x.start + off === p.start && x.len === p.len);
+        const holderMoved = !!holder && (() => { const h = day.people.find(x => x.name === holder.name); return !!h && !(h.start === p.start && h.len === p.len); })();
+        const anchor = !!a && !(p.start === r.start + off && p.len === r.len) && !holderMoved;
         if (lateHours || phase1 || anchor) set.add(p.name);
       });
     }

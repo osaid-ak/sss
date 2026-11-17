@@ -128,7 +128,7 @@ for (let i = 0; i < Math.max(8, Math.floor(runs / 6)); i++) {
   if (!Array.isArray(round.days["2026-11-27"].people)) bad.push("storage: an older snapshot should still load");
   const n1 = page.migrateSavedNights(), n2 = page.migrateSavedNights();
   if (n1 !== 1 || n2 !== 0) bad.push("storage: converting should be done once (" + n1 + ", " + n2 + ")");
-  if (page.data.schema !== 3) bad.push("storage: converting should set schema 3");
+  if (page.data.schema !== 4) bad.push("storage: converting should set schema 4");
   // schema 2 pinned the rotation people and the Support Line bars of this week: schema 3 lets this week follow the sheet too
   page.data.days["2026-11-17"] = { v: 2, ovr: { Ivan: { start: 8, brk: 12 }, Ashraf: { brk: 20 } }, lines: [{ owner: "Laraib", start: 6, len: 8 }] };
   page.data.days["2026-11-10"] = { v: 2, ovr: { Ivan: { start: 8, brk: 12 } } };
@@ -139,6 +139,39 @@ for (let i = 0; i < Math.max(8, Math.floor(runs / 6)); i++) {
   page.data.removed = [{ name: "Ivan", at: "x" }];
   const dropped = page.sanitizeData(clone(page.data));
   if ("Ivan" in (dropped.days["2026-11-25"] ? dropped.days["2026-11-25"].ovr : {})) { /* dropRemoved runs on merge; sanitize keeps the plan as saved */ }
+}
+// covers a lead made by moving hours (older versions kept them only as hours) become proper covers, so the break and the alerts are right
+{
+  const page = loadPage(NOW);
+  page.data = Object.assign(page.data, clone(fixturePlan())); page.data.pin = "x";
+  page.data.vipPlan = { blocks: [{ start: "2026-11-16", end: "2026-11-27", late: "Ammana", phase1: "Jawad", cover1: "", cover2: "" }], readAt: "x" };
+  page.data.leaves = [{ id: "l", name: "Ammana", start: "2026-11-17", end: "2026-11-17", status: "approved", note: "" }];
+  // Raza works the late shift for Ammana and Zarminay works the 6pm shift Raza left, both as hours moved by hand, Zarminay with his own old break
+  page.data.days["2026-11-17"] = { v: 2, ovr: { Raza: { start: 15, brk: 22 }, Zarminay: { start: 6, brk: 18 } } };
+  totals.adopt = (totals.adopt || 0) + 1;
+  const n = page.adoptCoversFromEdits();
+  const cov = page.data.lateCover["2026-11-17"];
+  const raza = page.resolveDay("2026-11-17").people.find(p => p.name === "Raza"), zar = page.resolveDay("2026-11-17").people.find(p => p.name === "Zarminay");
+  if (n !== 1 || !cov || cov.vip !== "Raza" || !cov.anchor || cov.anchor.Raza !== "Zarminay" || page.data.days["2026-11-17"]) bad.push("covers: hours moved by hand should become late-shift and anchor cover " + JSON.stringify(cov) + " " + JSON.stringify(page.data.days["2026-11-17"]));
+  if (!raza || raza.start !== 15 || !zar || zar.start !== 6 || zar.brk !== 6 + 8) bad.push("covers: Zarminay should work Raza's 6pm shift with Raza's break (" + (zar && [zar.start, zar.brk]) + ")");
+  const need = page.lateAlertHtml("2026-11-17");
+  if (/6pm–3am VIP is uncovered|Late shift/.test(need)) bad.push("covers: nothing should be left to ask a lead on that night: " + need.replace(/<[^>]+>/g, " ").replace(/s+/g, " ").slice(0, 300));
+}
+// the same night when the late-shift cover is stored as a cover and the old snapshot's hours for Raza (his own 6pm) were pinned over it
+{
+  const page = loadPage(NOW);
+  page.data = Object.assign(page.data, clone(fixturePlan())); page.data.pin = "x";
+  page.data.vipPlan = { blocks: [{ start: "2026-11-16", end: "2026-11-27", late: "Ammana", phase1: "Jawad", cover1: "", cover2: "" }], readAt: "x" };
+  page.data.leaves = [{ id: "l", name: "Ammana", start: "2026-11-17", end: "2026-11-17", status: "approved", note: "" }];
+  page.data.lateCover["2026-11-17"] = { vip: "Raza" };
+  page.data.days["2026-11-17"] = { v: 2, ovr: { Raza: { start: 6, brk: 14 }, Zarminay: { start: 6, brk: 18 } } };
+  totals.adopt = (totals.adopt || 0) + 1;
+  page.adoptCoversFromEdits();
+  const day = page.resolveDay("2026-11-17");
+  const raza = day.people.find(p => p.name === "Raza"), zar = day.people.find(p => p.name === "Zarminay");
+  if (!raza || raza.start !== 15) bad.push("covers: Raza should be on the late shift again (" + (raza && raza.start) + ")");
+  if (!zar || zar.start !== 6 || zar.brk !== 14) bad.push("covers: Zarminay should work Raza's 6pm shift with Raza's break (" + (zar && [zar.start, zar.brk]) + ")");
+  if (page.data.days["2026-11-17"]) bad.push("covers: nothing should be left pinned on that night: " + JSON.stringify(page.data.days["2026-11-17"]));
 }
 // Sync dates from the sheet: the chosen nights lose their edits (and the covers when asked), the others and Saturdays are left, and what was there comes back
 {
