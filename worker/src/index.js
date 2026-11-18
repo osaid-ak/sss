@@ -196,7 +196,7 @@ function planChanges(prev, next, limit) {
     const l = nl[id];
     if (/^Holiday plan/i.test(String(l.note || ""))) return;
     const old = pl[id];
-    if (!old) { out.push((l.status === "pending" ? "Requested leave for " : "Added " + (l.status || "") + " leave for ") + l.name + " (" + span(l) + ")"); return; }
+    if (!old) { out.push((l.status === "pending" ? "Requested " + (l.sick ? "sick " : "") + "leave for " : "Added " + (l.status || "") + (l.sick ? " sick" : "") + " leave for ") + l.name + " (" + span(l) + ")"); return; }
     if (old.status !== l.status) {
       const verb = { approved: "Approved", declined: "Declined", rejected: "Declined", cancelled: "Cancelled", pending: "Reopened" }[l.status] || "Changed";
       out.push(verb + " leave for " + l.name + " (" + span(l) + ")");

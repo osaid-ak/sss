@@ -527,6 +527,14 @@ const chain = cmd([{ op: "off", people: ["jawad"], dates: "today" }, { op: "take
 const chainDay = chain.ok && intercomPlan({ updatedAt: "x", calendar: chain.cal }, "2026-11-18", 1, NOW, { live: null, emails: [] }).days[0];
 check("command: 'Jawad is off, Raza covers him at 10.30, and because Raza is an anchor Zarminay covers Raza at 6pm': each cover is stated as the calendar words it, with nothing left open for Raza's anchor", chain.ok && chainDay.covers.filter(c => c.kind === "takeover").map(c => c.text).sort().join(" | ") === "Raza is covering Jawad on their 10:30pm–7:30am Phase 1 shift. | Zarminay is covering Raza on their 6pm–3am VIP shift." && !chainDay.needsCover.some(n => /6pm–3am/.test(n.text)) && chainDay.covers.filter(c => /Zarminay is covering Raza/.test(c.text)).length === 1 && chainDay.queues.Zarminay === "vip" && chainDay.queues.Raza === "phase1");
 check("command: without the 6pm Zarminay leaves nothing for Raza's anchor, so it is an open need until somebody takes it", (() => { const only = cmd([{ op: "off", people: ["jawad"], dates: "today" }, { op: "takeover", name: "raza", from: "jawad", shift: "10.30", dates: "today" }]); const d = intercomPlan({ updatedAt: "x", calendar: only.cal }, "2026-11-18", 1, NOW, { live: null, emails: [] }).days[0]; return d.needsCover.some(n => n.text === "Anchor shift 6pm–3am VIP is uncovered. Raza is covering Jawad."); })());
+{
+  const r = cmd([{ op: "off", people: ["jawad"], dates: "today", sick: true }]);
+  check("command: off with sick: true is stored as sick leave and the summary says off sick", r.ok && /off sick/.test(r.result.summary.join(" ")));
+  const sickDay = r.ok && intercomPlan({ updatedAt: "x", calendar: r.cal }, "2026-11-18", 1, NOW, { live: null, emails: [] }).days[0];
+  check("command: the sick leave is stored with sick: true and the read API lists the person as away with sick: true", r.ok && r.cal.leaves.some(l => l.name === "Jawad" && l.sick === true) && sickDay.away.some(a => a.name === "Jawad" && a.sick === true));
+  const plain = cmd([{ op: "off", people: ["jawad"], dates: "today" }]);
+  check("command: a plain off is not sick", plain.ok && !/sick/.test(plain.result.summary.join(" ")));
+}
 // the golden phrases handed to the Slack side: every one is accepted (or refused for the stated reason) by the real command logic
 import { readFileSync } from "node:fs";
 const golden = JSON.parse(readFileSync(new URL("../handoff/slack-calendar/golden.json", import.meta.url), "utf8"));

@@ -13,7 +13,8 @@
           "op": { "const": "off" },
           "people": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
           "dates": { "type": "string", "description": "e.g. today, this week and next, 20th Nov to 25th Nov" },
-          "note": { "type": "string" }
+          "note": { "type": "string" },
+          "sick": { "type": "boolean", "description": "true when the person is off sick (\"jawad is off sick\"); the calendar then shows a thermometer-face emoji beside the name" }
         },
         "required": ["op", "people", "dates"],
         "additionalProperties": false

@@ -79,7 +79,7 @@ Answer (200):
 
 | op | fields | what the calendar does |
 | --- | --- | --- |
-| `off` | `people[]`, `dates`, `note?` | approved leave on those days (Saturdays too; Sundays skipped) |
+| `off` | `people[]`, `dates`, `note?`, `sick?` | approved leave on those days (Saturdays too; Sundays skipped). `sick: true` when they are off sick: the calendar shows a 🤒 beside the name wherever it is crossed out |
 | `back` | `people[]`, `dates` | cancels leave for those days (the rest of the leave stays) |
 | `takeover` | `name`, `from`, `shift?`, `dates` | `name` works `from`'s queue and shift. `shift` names the shift when it is not `from`'s own that night (for example the 6pm anchor `from` left) |
 | `move` | `name`, `queue?`, `shift?`, `dates` | other queue (`phase1`, `vip`, `both`) and/or other hours that night |
@@ -108,7 +108,7 @@ Suggested system prompt:
 ```
 You turn a support lead's /calendar message into operations for the shift calendar. Reply only by calling the tool.
 - People are first names from this roster: <roster names>. Use exactly one of them, spelled as listed. If a name is not on it, ask.
-- "X is off" -> off. "X is back" -> back. "X covers Y" / "X takes Y's shift" -> takeover (name X, from Y). Add shift when a clock or shift is named ("at 6pm", "the 10.30 shift").
+- "X is off" -> off. "X is off sick" / "X called in sick" / "X is unwell" -> off with `sick: true`. "X is back" -> back. "X covers Y" / "X takes Y's shift" -> takeover (name X, from Y). Add shift when a clock or shift is named ("at 6pm", "the 10.30 shift").
 - "swapped with" -> swap. "switched / moved to Phase 1 (or VIP)" -> move with queue. "and the 10.30 shift" -> the same move with shift.
 - "X covers the late shift" -> cover kind late. "X covers the Phase 1 late shift" -> kind phase1. "X moves to Phase 1 because Y is off" -> cover kind p1q.
 - Copy the date words exactly as written ("from coming Monday to Thursday", "20th Nov to 25th Nov", "today and tomorrow"). Never convert them. If there are no dates, use "today".

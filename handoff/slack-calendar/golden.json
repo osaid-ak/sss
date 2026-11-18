@@ -25,6 +25,8 @@
   { "say": "swap jawad and raza today and tomorrow", "ok": true, "ops": [{ "op": "swap", "a": "Jawad", "b": "Raza", "dates": "today and tomorrow" }] },
   { "say": "bob is off today", "ok": false, "why": "nobody called bob on the roster", "ops": [{ "op": "off", "people": ["Bob"], "dates": "today" }] },
   { "say": "jawad off yesterday", "ok": false, "why": "already past", "ops": [{ "op": "off", "people": ["Jawad"], "dates": "yesterday" }] },
+  { "say": "jawad is off sick today", "ok": true, "ops": [{ "op": "off", "people": ["Jawad"], "dates": "today", "sick": true }] },
+  { "say": "jawad off sick this week and raza covers him", "ok": true, "ops": [{ "op": "off", "people": ["Jawad"], "dates": "this week", "sick": true }, { "op": "takeover", "name": "Raza", "from": "Jawad", "dates": "this week" }] },
   { "say": "jawad off sunday", "ok": false, "why": "Sunday is closed", "ops": [{ "op": "off", "people": ["Jawad"], "dates": "sunday" }] },
   { "say": "jawad off 25th nov to 20th nov", "ok": false, "why": "the end is before the start", "ops": [{ "op": "off", "people": ["Jawad"], "dates": "25th nov to 20th nov" }] },
   { "say": "swap jawad and raza on saturday", "ok": false, "why": "Saturdays follow the Weekend Cover sheet", "ops": [{ "op": "swap", "a": "Jawad", "b": "Raza", "dates": "2026-11-21" }] },

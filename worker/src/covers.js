@@ -204,6 +204,7 @@ export function makeEngine(cal, live, nowMs) {
   // ---- leave and holidays
   const approvedLeaves = () => leaves.filter(l => l.status === "approved");
   const onLeave = (name, key) => approvedLeaves().some(l => l.name === name && l.start <= key && key <= l.end);
+  const sickOn = (name, key) => approvedLeaves().some(l => l.sick === true && l.name === name && l.start <= key && key <= l.end);
   function holidayMark(name, key) {
     for (let i = 0; i < holidays.length; i++) {
       if (holidays[i].status !== "confirmed") continue;
@@ -708,7 +709,7 @@ export function makeEngine(cal, live, nowMs) {
     return out;
   }
 
-  return { roster, nightEdits, resolveDay, coveringFor, needsCover, vipBlockFor, awayMark, lateCoverFor, changesFor, anchorGaps, gapCover, anchorCoverFor, lateStartFor };
+  return { roster, nightEdits, resolveDay, coveringFor, needsCover, vipBlockFor, awayMark, sickOn, lateCoverFor, changesFor, anchorGaps, gapCover, anchorCoverFor, lateStartFor };
 }
 
 // ---------------------------------------------------------------------------------------------------------------- the day for the API
@@ -725,19 +726,20 @@ function coverEntry(key, e) {
   return out;
 }
 
-// -> { away: [{ name, kind: "off" | "pto" }], covers: [...], needsCover: [...], rotation: { phase1, lateShift } } for one shift day.
+// -> { away: [{ name, kind: "off" | "pto", sick?: true }], covers: [...], needsCover: [...], rotation: { phase1, lateShift } } for one shift day.
 export function coversForDay(engine, key, weekendNames) {
   if (isSunday(key)) return { away: [], covers: [], needsCover: [], rotation: { phase1: null, lateShift: null } };
   if (isSaturday(key)) {
     // a Saturday is the people the Weekend Cover names; there are no covers on it
     const names = (weekendNames || []).filter(Boolean);
-    const away = names.map(n => ({ name: n, kind: engine.awayMark(n, key) })).filter(a => a.kind);
+    const away = names.map(n => ({ name: n, kind: engine.awayMark(n, key) })).filter(a => a.kind).map(a => (engine.sickOn(a.name, key) ? Object.assign(a, { sick: true }) : a));
     return { away, covers: [], needsCover: [], rotation: { phase1: null, lateShift: null } };
   }
   const day = engine.resolveDay(key);
   const { covers } = engine.coveringFor(key, day);
   const blk = engine.vipBlockFor(key) || {};
-  const away = day.people.filter(p => day.away.has(p.name)).map(p => ({ name: p.name, kind: engine.awayMark(p.name, key) || "pto" }))
+  const away = day.people.filter(p => day.away.has(p.name)).map(p => (({ name: p.name, kind: engine.awayMark(p.name, key) || "pto" })))
+    .map(a => (engine.sickOn(a.name, key) ? Object.assign(a, { sick: true }) : a))
     .sort((a, b) => a.name.localeCompare(b.name));
   return {
     away,

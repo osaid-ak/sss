@@ -6,7 +6,7 @@
 // the calendar's own plan (leave, covers, and per-night changes that apply to the nights named and nothing else).
 //
 // Operations:
-//   { op: "off",      people: ["Jawad"], dates, note? }                         approved leave on those days
+//   { op: "off",      people: ["Jawad"], dates, note?, sick? }                  approved leave on those days (sick: true = off sick, shown with a thermometer face)
 //   { op: "back",     people: ["Jawad"], dates }                               cancel leave on those days (the rest of the leave stays)
 //   { op: "takeover", name: "Raza", from: "Jawad", shift?, dates }              Raza works Jawad's queue and shift on those nights; "shift" names
 //                                                                                the shift when it is not Jawad's own that night (the 6pm anchor he left)
@@ -195,6 +195,7 @@ export function planCommand(doc, req, live, nowMs) {
       const names = (Array.isArray(op.people) ? op.people : [op.name]).map(n => person(n, roster).name);
       if (!names.length) throw new OpError("who is off? a name is missing");
       const use = days(op, { saturday: true });
+      const sick = op.sick === true || op.sick === "true";
       names.forEach(name => {
         const already = k => eng().awayMark(name, k);
         const kept = use.filter(k => !already(k));
@@ -210,11 +211,11 @@ export function planCommand(doc, req, live, nowMs) {
         });
         runs.forEach(run => {
           const id = "lv-cmd-" + cmd + "-" + (++seq);
-          cal.leaves.push({ id, name, start: run[0], end: run[run.length - 1], note: String(op.note || ("Added by " + by + " via " + via)).slice(0, 200), status: "approved", requestedAt: stamp, reviewedAt: stamp, reviewNote: "Approved by " + by + " via " + via });
+          cal.leaves.push({ id, name, start: run[0], end: run[run.length - 1], note: String(op.note || ((sick ? "Off sick, added by " : "Added by ") + by + " via " + via)).slice(0, 200), ...(sick ? { sick: true } : {}), status: "approved", requestedAt: stamp, reviewedAt: stamp, reviewNote: "Approved by " + by + " via " + via });
           undo.leavesAdded.push(id);
           run.forEach(k => touched.add(k));
         });
-        lines.push(name + " is off " + describeDates(kept) + " (approved leave).");
+        lines.push(name + " is off " + (sick ? "sick " : "") + describeDates(kept) + " (approved leave).");
         if (kept.some(isSaturday)) warnings.push(name + " is off on a Saturday: the Weekend Cover sheet decides who works it, so the spot needs a name there");
       });
     },
