@@ -639,7 +639,8 @@ export function makeEngine(cal, live, nowMs) {
       const instead = "working " + span(p.start, p.len) + " instead of their usual " + span(usual.start + shift, usual.len);
       out.push({ name: p.name, kind: "hours", for: away.join(", "), what: "", text: away.length ? "is covering " + away.join(", ") + ": " + instead : "is " + instead, lo: p.start, hi: p.start + p.len });
     });
-    return { covers: out, rotation };
+    // somebody who is away is not covering anyone that night (only the sheet rotation tag stays)
+    return { covers: out.filter(e => e.kind === "rotation" || !day.away.has(e.name)), rotation };
   }
 
   // Stretches of the Support Line window where nobody is on the line (the page's lineZeroRuns, from assignmentAt).
