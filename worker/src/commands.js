@@ -181,6 +181,8 @@ export function planCommand(doc, req, live, nowMs) {
     e.changesFor(key).forEach(ch => [ch.name, ch.from, ch.a, ch.b].forEach(n => n && names.add(n)));
     return names;
   }
+  // the Support Line bars a lead had arranged by hand on that night (a swap or takeover moves them too, see covers.js buildNight)
+  const linesFold = key => { const e = eng(), ed = e.nightEdits(key); return ed && ed.lines ? e.barsSig(ed.lines) : null; };
   const working = (name, key) => !eng().resolveDay(key).away.has(name);
   function addChange(key, rec) {
     const id = "chg-" + cmd + "-" + (++seq);
@@ -260,7 +262,10 @@ export function planCommand(doc, req, live, nowMs) {
         if (working(from.name, k) && op.shift == null) warnings.push(from.name + " is not marked off on " + dayLabel(k));
         let sh = null;
         if (op.shift != null) { const r = shiftFor(op.shift, k); sh = r.shift; r.warn.forEach(w => warnings.push(w)); }
-        addChange(k, sh ? { type: "takeover", name: p.name, from: from.name, shift: sh } : { type: "takeover", name: p.name, from: from.name });
+        const rec = sh ? { type: "takeover", name: p.name, from: from.name, shift: sh } : { type: "takeover", name: p.name, from: from.name };
+        const fold = linesFold(k);
+        if (fold) rec.fold = fold;
+        addChange(k, rec);
         ok.push(k);
       });
       if (!ok.length) throw new OpError(p.name + " cannot take over " + from.name + "'s shift on any of those days" + why());
@@ -301,7 +306,21 @@ export function planCommand(doc, req, live, nowMs) {
         const used = committed(k);
         const busy = [a, b].find(x => used.has(x.name));
         if (busy) { skipped.push(busy.name + " already has a cover or move on " + dayLabel(k)); return; }
-        addChange(k, { type: "swap", a: a.name, b: b.name });
+        // each person's shift as it is now (covers and hand edits included): that is what the other one takes over
+        const e = eng(), day = e.resolveDay(k), ed = e.nightEdits(k);
+        const cur = n => { const p = day.people.find(x => x.name === n); if (!p) return null; const r = e.rolesOf(p); return { start: p.start, len: p.len, brk: p.brk, split: p.split ? clone(p.split) : null, phase1: !!r.phase1, vip: !!r.vip }; };
+        const na = cur(a.name), nb = cur(b.name);
+        const rec = { type: "swap", a: a.name, b: b.name };
+        const fold = linesFold(k);
+        if (fold) rec.fold = fold;
+        if (na && nb) {
+          rec.now = { a: na, b: nb };
+          const eo = {};
+          if (ed && ed.ovr && ed.ovr[a.name]) eo.a = clone(ed.ovr[a.name]);
+          if (ed && ed.ovr && ed.ovr[b.name]) eo.b = clone(ed.ovr[b.name]);
+          if (Object.keys(eo).length) rec.edited = eo;
+        }
+        addChange(k, rec);
         ok.push(k);
       });
       if (!ok.length) throw new OpError("the swap cannot be made on any of those days" + why());

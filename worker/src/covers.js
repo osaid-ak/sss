@@ -78,6 +78,17 @@ const rolesOf = p => p.roles || normalizeRoles(p);
 const queueFromRoles = r => (r.phase1 && r.vip ? "both" : r.phase1 ? "phase1" : r.vip ? "vip" : "lead");
 
 // ---------------------------------------------------------------------------------------------------------------- the engine
+// The hand edits a swap already took into account (it recorded each person's shift as it was then) must not be put back on top of the swap.
+export function dropFoldedEdits(ovr, list) {
+  const same = (x, y) => JSON.stringify(x, Object.keys(x || {}).sort()) === JSON.stringify(y, Object.keys(y || {}).sort());
+  let out = null;
+  (list || []).forEach(c => {
+    if (c.type !== "swap" || !c.edited) return;
+    [[c.a, "a"], [c.b, "b"]].forEach(([n, s]) => { if (c.edited[s] && ovr && ovr[n] && same(ovr[n], c.edited[s])) { out = out || Object.assign({}, ovr); delete out[n]; } });
+  });
+  return out || ovr;
+}
+
 export function makeEngine(cal, live, nowMs) {
   live = live || {};
   const stored = key => cal[key];
@@ -166,7 +177,24 @@ export function makeEngine(cal, live, nowMs) {
     if (!h || (h.start === o.start && h.len === o.len)) { applyHoursToPerson(p, o.start, o.len, o.brk); p.split = o.split ? clone(o.split) : null; return; }
     takeHours(p, h);
   }
-  function applyChanges(people, key, only) {
+  // The Support Line goes with the shift: in a swap the two people exchange their slots, and whoever takes over somebody's whole shift takes their slots.
+  function moveLine(c, people, bars) {
+    const pair = c.type === "swap" ? [c.a, c.b] : [c.name, c.from];
+    const had = pair.map(n => bars.some(b => b.owner === n));
+    bars.forEach(b => {
+      if (c.type === "swap") { if (b.owner === c.a) b.owner = c.b; else if (b.owner === c.b) b.owner = c.a; }
+      else if (b.owner === c.from) b.owner = c.name;
+    });
+    pair.forEach((n, i) => {
+      const p = people.find(x => x.name === n);
+      if (!p) return;
+      const has = bars.some(b => b.owner === n);
+      if (has) p.roles = Object.assign({}, rolesOf(p), { line: true }); else if (had[i]) p.roles = Object.assign({}, rolesOf(p), { line: false });
+    });
+  }
+  const barsSig = bars => JSON.stringify((bars || []).map(b => [b.owner, b.start, b.len]));
+  function applyChanges(people, key, only, lineBars) {
+    const moved = new Set();
     const orig = {};
     people.forEach(x => { orig[x.name] = { start: x.start, len: x.len, brk: x.brk, split: x.split ? clone(x.split) : null }; });
     changesFor(key).forEach(c => {
@@ -186,19 +214,23 @@ export function makeEngine(cal, live, nowMs) {
         const h = c.shift && changeHours(key, c.shift);
         const holder = h && !(h.start === o.start && h.len === o.len) && Object.keys(orig).map(n => orig[n]).find(x => x.start === h.start && x.len === h.len);
         if (holder) takeWhole(p, holder, null || h); else takeWhole(p, o, h);
+        if (!h || (h.start === o.start && h.len === o.len)) { moved.add(c.id); if (lineBars) moveLine(c, people, lineBars); }
         // the anchor shifts are VIP seats; any other shift keeps the queue of the person being covered
         p.roles = Object.assign({}, rolesOf(p), c.shift && c.shift.kind === "anchor" ? { phase1: false, vip: true } : { phase1: r.phase1, vip: r.vip });
       } else if (c.type === "swap") {
         const a = find(c.a), b = find(c.b);
         if (!a || !b || a === b) return;
         const take = p => ({ start: p.start, len: p.len, brk: p.brk, split: p.split ? clone(p.split) : null, phase1: rolesOf(p).phase1, vip: rolesOf(p).vip });
-        const sa = take(a), sb = take(b);
+        const sa = c.now ? c.now.a : take(a), sb = c.now ? c.now.b : take(b);
+        moved.add(c.id);
+        if (lineBars) moveLine(c, people, lineBars);
         [[a, sb], [b, sa]].forEach(([p, t]) => {
           p.start = t.start; p.len = t.len; p.brk = t.brk; p.split = t.split;
           p.roles = Object.assign({}, rolesOf(p), { phase1: t.phase1, vip: t.vip });
         });
       }
     });
+    return moved;
   }
 
   // ---- leave and holidays
@@ -318,10 +350,14 @@ export function makeEngine(cal, live, nowMs) {
     applyAnchorCover(people, key);
     applyHolidayHours(people, key);
     applyLateCover(people, key);
-    applyChanges(people, key, opts && opts.onlyChanges);
+    const lineMoved = applyChanges(people, key, opts && opts.onlyChanges, lineBars);
     if (edits) {
-      applyEdits(people, edits.ovr);
-      if (edits.lines) lineBars.splice(0, lineBars.length, ...clone(edits.lines));
+      applyEdits(people, dropFoldedEdits(edits.ovr, changesFor(key)));
+      if (edits.lines) {
+        lineBars.splice(0, lineBars.length, ...clone(edits.lines));
+        const sig = barsSig(edits.lines);
+        changesFor(key).forEach(c => { if (lineMoved.has(c.id) && c.fold === sig) moveLine(c, people, lineBars); });
+      }
     }
     return { people, lineBars };
   }
@@ -604,6 +640,7 @@ export function makeEngine(cal, live, nowMs) {
         } else touched.push([c.name, ""]);
       });
       const seen = new Set();
+      touched.sort((x, y) => (y[1] ? 1 : 0) - (x[1] ? 1 : 0));
       touched.forEach(([name, prefix]) => {
         if (seen.has(name) && !prefix) return;
         const p = day.people.find(x => x.name === name);
@@ -615,7 +652,8 @@ export function makeEngine(cal, live, nowMs) {
         const bits = [];
         if (nowQ !== usualQ) bits.push("on " + qLabel(nowQ) + " instead of " + qLabel(usualQ));
         if (p.start !== usual.start + shiftOff || p.len !== usual.len) bits.push("working " + span(p.start, p.len) + " instead of their usual " + span(usual.start + shiftOff, usual.len));
-        if (bits.length || prefix) out.push({ name, kind: "change", for: "", what: "", text: "is " + (bits.length ? bits.join(" and ") : "on the same shift") + (prefix ? " (" + prefix + ")" : ""), lo: p.start, hi: p.start + p.len });
+        if (prefix) out.push({ name, kind: "change", label: "Swap", for: "", what: "", text: prefix.replace("swapped with", "swapped shifts with") + (bits.length ? ": " + bits.join(" and ") : ""), lo: p.start, hi: p.start + p.len });
+        else if (bits.length) out.push({ name, kind: "change", label: "Moved", for: "", what: "", text: "is " + bits.join(" and "), lo: p.start, hi: p.start + p.len });
       });
     }
     // the two-week rotation: tagged "(Late Shift)" / "(Phase 1)" on screen, not part of the covers list
@@ -686,7 +724,11 @@ export function makeEngine(cal, live, nowMs) {
     });
     // Phase 1 queue cover: the sheet's Phase 1 person is off and no VIP rep was put on Phase 1 (not on days edited by hand)
     const blk = vipBlockFor(key);
-    if (blk && blk.phase1 && day.away.has(blk.phase1) && !(lateCoverFor(key) || {}).p1q && !(nightEdits(key) || { ovr: {} }).ovr[blk.phase1]) {
+    if (blk && blk.phase1 && day.away.has(blk.phase1) && !(lateCoverFor(key) || {}).p1q && !(nightEdits(key) || { ovr: {} }).ovr[blk.phase1]
+      && !changesFor(key).some(c =>
+        (c.type === "takeover" && c.from === blk.phase1 && !day.away.has(c.name)) ||
+        (c.type === "swap" && ((c.a === blk.phase1 && !day.away.has(c.b)) || (c.b === blk.phase1 && !day.away.has(c.a)))) ||
+        (c.type === "queue" && c.queue !== "vip" && c.name !== blk.phase1 && !day.away.has(c.name)))) {
       out.push({ kind: "phase1", text: "Phase 1 needs cover. " + blk.phase1 + " is off. Add a VIP rep to Phase 1." });
     }
     const rot = lineRotationFor(key);
@@ -710,7 +752,7 @@ export function makeEngine(cal, live, nowMs) {
     return out;
   }
 
-  return { roster, nightEdits, resolveDay, coveringFor, needsCover, vipBlockFor, awayMark, sickOn, lateCoverFor, changesFor, anchorGaps, gapCover, anchorCoverFor, lateStartFor };
+  return { roster, nightEdits, rolesOf, barsSig, resolveDay, coveringFor, needsCover, vipBlockFor, awayMark, sickOn, lateCoverFor, changesFor, anchorGaps, gapCover, anchorCoverFor, lateStartFor };
 }
 
 // ---------------------------------------------------------------------------------------------------------------- the day for the API
@@ -718,6 +760,7 @@ function coverEntry(key, e) {
   const text = e.text ? e.name + " " + e.text + "." : e.name + " is covering " + (e.for ? e.for + " on " : "") + e.what + "." + (e.extra ? " " + e.extra : "");
   const out = { kind: e.kind, name: e.name, for: e.for || null, what: e.what || null, text };
   if (e.extra) out.extra = e.extra;
+  if (e.label) out.label = e.label;
   if (Number.isFinite(e.lo) && Number.isFinite(e.hi)) {
     out.from = slotLabel(e.lo);
     out.to = slotLabel(e.hi);

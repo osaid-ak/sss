@@ -516,13 +516,45 @@ check("command: a named shift takes the break of whoever normally works it (Zarm
 const lateBrk = (today, day) => { const r = planCommand({ updatedAt: "x", calendar: cmdCal }, { commandId: "c", today, actor: { email: "ann@example.com" }, ops: [{ op: "move", name: "Jawad", shift: "late", dates: "today" }, { op: "takeover", name: "Raza", from: "Ivan", dates: "today" }] }, null, Date.parse(today + "T05:00:00Z")); const d = makeEngine(r.cal, null, Date.parse(today + "T05:00:00Z")).resolveDay(day); const j = d.people.find(p => p.name === "Jawad"); return [j.start, j.brk]; };
 const lw = lateBrk("2026-11-18", "2026-11-18"), ls = lateBrk("2027-07-14", "2027-07-14");
 check("late shift break is always 2am PKT in standard time and 1am in summer (seven half-hours after the 10:30pm / 9:30pm start)", lw[1] - lw[0] === 7 && lw[0] === 15 && ls[1] - ls[0] === 7 && ls[0] === 13);
+{
+  // a swap exchanges what each person has that night NOW (hand edits and covers included), and the hand edit is not put back on top of it
+  const e0 = makeEngine(cmdCal, null, NOW).resolveDay("2026-11-24").people, base = n => e0.find(p => p.name === n);
+  const hand = clone(cmdCal);
+  hand.days = { "2026-11-24": { v: 2, ovr: { Zarminay: { start: base("Zarminay").start - 2, len: base("Zarminay").len, brk: base("Zarminay").brk - 2 } }, lines: null } };
+  const hDoc = { updatedAt: "2026-11-18T00:00:00.000Z", calendar: hand };
+  const hs = planCommand(hDoc, { commandId: "c-hand", today: "2026-11-24", actor: { email: "ann@example.com" }, ops: [{ op: "swap", a: "zarminay", b: "ivan", dates: "today" }] }, null, NOW);
+  const hp = n => makeEngine(hs.cal, null, NOW).resolveDay("2026-11-24").people.find(p => p.name === n);
+  const zNow = makeEngine(hand, null, NOW).resolveDay("2026-11-24").people.find(p => p.name === "Zarminay");
+  check("command: a swap takes each person's shift as it is now, a hand edit included (the edit is not put back over the swap)", hs.ok && hp("Ivan").start === zNow.start && hp("Ivan").len === zNow.len && hp("Zarminay").start === base("Ivan").start);
+  const afterEdit = clone(hs.cal); afterEdit.days["2026-11-24"].ovr.Ivan = { start: 20 };
+  check("command: an edit made after the swap still wins", makeEngine(afterEdit, null, NOW).resolveDay("2026-11-24").people.find(p => p.name === "Ivan").start === 20);
+}
+{
+  // the Support Line goes with the shift: a swap exchanges the slots, a takeover of a whole shift takes them
+  const lc = clone(cmdCal);
+  lc.sheetPlan = { hours: {}, line: [{ start: "2026-11-16", end: "2026-11-27", slots: ["Raza", "Ivan", "Zarminay"], backup: "Ammana" }], readAt: "x" };
+  const lDoc = { updatedAt: "2026-11-18T00:00:00.000Z", calendar: lc };
+  const run = (ops, doc) => planCommand(doc || lDoc, { commandId: "c-line", today: "2026-11-24", actor: { email: "ann@example.com" }, ops }, null, NOW);
+  const bars = (cal, n) => makeEngine(cal, null, NOW).resolveDay("2026-11-24").lineBars.filter(b => b.owner === n).map(b => b.start + "+" + b.len).join();
+  const before = n => bars(lc, n);
+  const sw2 = run([{ op: "swap", a: "raza", b: "zarminay", dates: "today" }]);
+  check("command: a swap exchanges the Support Line slots with the shifts", sw2.ok && bars(sw2.cal, "Raza") === before("Zarminay") && bars(sw2.cal, "Zarminay") === before("Raza") && before("Raza") !== "");
+  const tk = run([{ op: "off", people: ["raza"], dates: "today" }, { op: "takeover", name: "jawad", from: "raza", dates: "today" }]);
+  check("command: whoever takes over a whole shift takes the Support Line slots too (and the backup does not move)", tk.ok && bars(tk.cal, "Jawad") === before("Raza") && !makeEngine(tk.cal, null, NOW).resolveDay("2026-11-24").lineBars.some(b => b.owner === "Ammana"));
+  const eng2 = makeEngine(sw2.cal, null, NOW).resolveDay("2026-11-24");
+  check("command: after the swap nobody is missing from the Support Line", !eng2.lineBars.some(b => !eng2.people.find(p => p.name === b.owner)));
+  // a night whose bars a lead arranged by hand: the swap still moves them
+  const hl = clone(lc); hl.days = { "2026-11-24": { v: 2, ovr: {}, lines: [{ owner: "Raza", start: 8, len: 6 }, { owner: "Ivan", start: 14, len: 4 }] } };
+  const hs2 = run([{ op: "swap", a: "raza", b: "zarminay", dates: "today" }], { updatedAt: "x", calendar: hl });
+  check("command: a swap also moves Support Line bars a lead arranged by hand", hs2.ok && bars(hs2.cal, "Zarminay") === "8+6" && bars(hs2.cal, "Raza") === "");
+}
 const mv = cmd([{ op: "move", name: "Jawad", queue: "phase1", shift: "10.30", dates: "from 20th Nov to 25th Nov" }]);
 check("command: 'move Jawad to Phase 1 and the 10.30 shift from 20th Nov to 25th Nov': only the days named, Saturday and Sunday skipped with the reason", mv.ok && Object.keys(mv.cal.changes).join() === "2026-11-20,2026-11-23,2026-11-24,2026-11-25" && mv.result.skipped.length === 2 && /Saturdays follow the Weekend Cover/.test(mv.result.skipped[0]) && mv.result.summary[0] === "Jawad moved to Phase 1 and to the late shift 10:30pm–7:30am Fri 20 Nov, Mon 23 Nov to Wed 25 Nov.");
 const mvPlan = intercomPlan({ updatedAt: "x", calendar: mv.cal }, "2026-11-19", 3, NOW, { live: null, emails: [] });
 check("command: the move shows on its days only (19th untouched, 20th moved)", !mvPlan.days[0].covers.some(c => /10:30pm/.test(c.text) && c.name === "Jawad") && mvPlan.days[1].covers.some(c => c.name === "Jawad" && c.text === "Jawad is working 10:30pm–7:30am instead of their usual 8pm–5am."));
 const sw = cmd([{ op: "swap", a: "jawad", b: "raza", dates: "coming Monday to Thursday" }]);
 const swDay = intercomPlan({ updatedAt: "x", calendar: sw.cal }, "2026-11-23", 1, NOW, { live: null, emails: [] }).days[0];
-check("command: a swap exchanges shifts and queues on the nights named", sw.ok && swDay.queues.Jawad === "vip" && swDay.queues.Raza === "phase1" && swDay.covers.some(c => c.name === "Jawad" && /swapped with Raza/.test(c.text)) && sw.result.summary[0] === "Jawad and Raza swap shifts Mon 23 Nov to Thu 26 Nov.");
+check("command: a swap exchanges shifts and queues on the nights named", sw.ok && swDay.queues.Jawad === "vip" && swDay.queues.Raza === "phase1" && swDay.covers.some(c => c.name === "Jawad" && c.label === "Swap" && /swapped shifts with Raza/.test(c.text)) && sw.result.summary[0] === "Jawad and Raza swap shifts Mon 23 Nov to Thu 26 Nov.");
 const chain = cmd([{ op: "off", people: ["jawad"], dates: "today" }, { op: "takeover", name: "raza", from: "jawad", shift: "10.30", dates: "today" }, { op: "takeover", name: "zarminay", from: "raza", shift: "6pm", dates: "today" }]);
 const chainDay = chain.ok && intercomPlan({ updatedAt: "x", calendar: chain.cal }, "2026-11-18", 1, NOW, { live: null, emails: [] }).days[0];
 check("command: 'Jawad is off, Raza covers him at 10.30, and because Raza is an anchor Zarminay covers Raza at 6pm': each cover is stated as the calendar words it, with nothing left open for Raza's anchor", chain.ok && chainDay.covers.filter(c => c.kind === "takeover").map(c => c.text).sort().join(" | ") === "Raza is covering Jawad on their 10:30pm–7:30am Phase 1 shift. | Zarminay is covering Raza on their 6pm–3am VIP shift." && !chainDay.needsCover.some(n => /6pm–3am/.test(n.text)) && chainDay.covers.filter(c => /Zarminay is covering Raza/.test(c.text)).length === 1 && chainDay.queues.Zarminay === "vip" && chainDay.queues.Raza === "phase1");

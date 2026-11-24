@@ -16,7 +16,7 @@
 // stays where they are). Sheet data is read live when the caller passes it (see sheets.js); the stored copy is the fallback.
 
 import { matchName } from "./sheets.js";
-import { makeEngine, coversForDay } from "./covers.js";
+import { makeEngine, coversForDay, dropFoldedEdits } from "./covers.js";
 
 const DAY_MS = 86400000;
 const PKT_MS = 5 * 3600000;
@@ -120,14 +120,16 @@ export function dayPlan(cal, key, live, emails, anchorCovers, edits) {
       if (c.type === "queue") set(c.name, c.queue, "calendar command");
       else if (c.type === "takeover") { const q = c.shift && c.shift.kind === "anchor" ? "vip" : now(c.from); if (usable(q)) set(c.name, q, "calendar command"); }
       else if (c.type === "swap") {
-        const qa = now(c.a), qb = now(c.b);
+        const qOf = s => (s ? (s.phase1 && s.vip ? "both" : s.phase1 ? "phase1" : s.vip ? "vip" : null) : null);
+        const qa = (c.now && qOf(c.now.a)) || now(c.a), qb = (c.now && qOf(c.now.b)) || now(c.b);
         if (usable(qb)) set(c.a, qb, "calendar command");
         if (usable(qa)) set(c.b, qa, "calendar command");
       }
     });
     // what a lead edited on the night comes last (the page applies the overrides after the covers and the commands)
-    if (edits) Object.keys(edits.ovr).forEach(name => {
-      const o = edits.ovr[name], r = roster.find(x => x.name === name);
+    const liveOvr = edits ? dropFoldedEdits(edits.ovr, (cal.changes && cal.changes[key]) || []) : null;
+    if (edits) Object.keys(liveOvr).forEach(name => {
+      const o = liveOvr[name], r = roster.find(x => x.name === name);
       if (o && o.roles && r) set(name, queueOfRoles(Object.assign({}, r.roles || {}, o.roles)), "day edited by a lead");
     });
   }
