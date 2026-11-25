@@ -183,6 +183,22 @@ export function planCommand(doc, req, live, nowMs) {
   }
   // the Support Line bars a lead had arranged by hand on that night (a swap or takeover moves them too, see covers.js buildNight)
   const linesFold = key => { const e = eng(), ed = e.nightEdits(key); return ed && ed.lines ? e.barsSig(ed.lines) : null; };
+  // who holds which Support Line slot on a night, and the sentences for the slots that change hands when `change` runs (a swap or takeover moves them)
+  const slotOwners = key => eng().resolveDay(key).lineBars.map(b => ({ at: b.start + "+" + b.len, from: b.start, len: b.len, owner: b.backupInfo ? b.backupInfo.owner : b.owner, holder: b.owner }));
+  function withLineMoves(key, change) {
+    const before = slotOwners(key);
+    change();
+    const after = slotOwners(key);
+    const moves = [];
+    if (before.length === after.length) after.forEach((a, i) => {
+      const was = before[i];
+      if (was.at === a.at && was.holder !== a.holder) moves.push(was.owner + "'s " + slotLabel(a.from) + "–" + slotLabel(a.from + a.len) + " slot goes to " + a.holder);
+    });
+    return moves;
+  }
+  const lineNotes = new Map(); // sentence -> dates it applies to
+  const noteLine = (moves, key) => moves.forEach(m => { (lineNotes.get(m) || lineNotes.set(m, []).get(m)).push(key); });
+  const flushLineNotes = () => { lineNotes.forEach((keys, m) => lines.push("Support Line: " + m + " " + describeDates(keys) + ".")); lineNotes.clear(); };
   const working = (name, key) => !eng().resolveDay(key).away.has(name);
   function addChange(key, rec) {
     const id = "chg-" + cmd + "-" + (++seq);
@@ -265,11 +281,12 @@ export function planCommand(doc, req, live, nowMs) {
         const rec = sh ? { type: "takeover", name: p.name, from: from.name, shift: sh } : { type: "takeover", name: p.name, from: from.name };
         const fold = linesFold(k);
         if (fold) rec.fold = fold;
-        addChange(k, rec);
+        noteLine(withLineMoves(k, () => addChange(k, rec)), k);
         ok.push(k);
       });
       if (!ok.length) throw new OpError(p.name + " cannot take over " + from.name + "'s shift on any of those days" + why());
       lines.push(p.name + " takes over " + from.name + "'s " + (op.shift != null ? "shift (" + shiftLabel(shiftFor(op.shift, ok[0]).shift, ok[0]).replace(/^the /, "") + ") and queue " : "shift and queue ") + describeDates(ok) + ".");
+      flushLineNotes();
     },
 
     move(op) {
@@ -320,11 +337,12 @@ export function planCommand(doc, req, live, nowMs) {
           if (ed && ed.ovr && ed.ovr[b.name]) eo.b = clone(ed.ovr[b.name]);
           if (Object.keys(eo).length) rec.edited = eo;
         }
-        addChange(k, rec);
+        noteLine(withLineMoves(k, () => addChange(k, rec)), k);
         ok.push(k);
       });
       if (!ok.length) throw new OpError("the swap cannot be made on any of those days" + why());
       lines.push(a.name + " and " + b.name + " swap shifts " + describeDates(ok) + ".");
+      flushLineNotes();
     },
 
     cover(op) {

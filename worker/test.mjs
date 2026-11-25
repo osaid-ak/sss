@@ -542,6 +542,9 @@ check("late shift break is always 2am PKT in standard time and 1am in summer (se
   const tk = run([{ op: "off", people: ["raza"], dates: "today" }, { op: "takeover", name: "jawad", from: "raza", dates: "today" }]);
   check("command: whoever takes over a whole shift takes the Support Line slots too (and the backup does not move)", tk.ok && bars(tk.cal, "Jawad") === before("Raza") && !makeEngine(tk.cal, null, NOW).resolveDay("2026-11-24").lineBars.some(b => b.owner === "Ammana"));
   const eng2 = makeEngine(sw2.cal, null, NOW).resolveDay("2026-11-24");
+  check("command: the swap summary says which Support Line slots changed hands", sw2.result.summary.some(l => /Support Line: Raza's .* slot goes to Zarminay/.test(l)) && sw2.result.summary.some(l => /Support Line: Zarminay's .* slot goes to Raza/.test(l)));
+  check("command: the takeover summary says who took the Support Line slot", tk.result.summary.some(l => /Support Line: Raza's .* slot goes to Jawad/.test(l)));
+  check("command: no Support Line sentence when no slot moves", !cmd([{ op: "swap", a: "ivan", b: "jawad", dates: "today" }]).result.summary.some(l => /Support Line/.test(l)));
   check("command: after the swap nobody is missing from the Support Line", !eng2.lineBars.some(b => !eng2.people.find(p => p.name === b.owner)));
   // a night whose bars a lead arranged by hand: the swap still moves them
   const hl = clone(lc); hl.days = { "2026-11-24": { v: 2, ovr: {}, lines: [{ owner: "Raza", start: 8, len: 6 }, { owner: "Ivan", start: 14, len: 4 }] } };
