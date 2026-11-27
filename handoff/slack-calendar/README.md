@@ -81,8 +81,8 @@ Answer (200):
 | --- | --- | --- |
 | `off` | `people[]`, `dates`, `note?`, `sick?` | approved leave on those days (Saturdays too; Sundays skipped). `sick: true` when they are off sick: the calendar shows a 🤒 beside the name wherever it is crossed out |
 | `back` | `people[]`, `dates` | cancels leave for those days (the rest of the leave stays) |
-| `takeover` | `name`, `from`, `shift?`, `dates` | `name` works `from`'s queue and shift. `shift` names the shift when it is not `from`'s own that night (for example the 6pm anchor `from` left) |
-| `move` | `name`, `queue?`, `shift?`, `dates` | other queue (`phase1`, `vip`, `both`) and/or other hours that night |
+| `takeover` | `name`, `from`, `shift?`, `release?`, `dates` | `name` works `from`'s queue and shift. `shift` names the shift when it is not `from`'s own that night (for example the 6pm anchor `from` left). `release: true` (for "replaces", not plain "covers") sends `from` back to their usual hours when they are working, so two people do not hold the same shift |
+| `move` | `name`, `queue?`, `shift?`, `dates` | other queue (`phase1`, `vip`, `both`) and/or other hours that night. `shift: "usual"` ("his own shift", "original shift") puts the person on their own roster hours, break and split; the queue stays. A person who is already on their usual hours is reported as such, not as an error, when another step of the same command changed something |
 | `swap` | `a`, `b`, `dates` | the two exchange shifts and queues |
 | `cover` | `kind` (`late`, `phase1`, `p1q`, `anchor`), `name`, `for?`, `dates` | the calendar's own cover slots: VIP / Phase 1 late-shift cover, a VIP rep moved to Phase 1, or the anchor a late-shift cover left (`for` = whose) |
 
@@ -110,6 +110,7 @@ You turn a support lead's /calendar message into operations for the shift calend
 - People are first names from this roster: <roster names>. Use exactly one of them, spelled as listed. If a name is not on it, ask.
 - "X is off" -> off. "X is off sick" / "X called in sick" / "X is unwell" -> off with `sick: true`. "X is back" -> back. "X covers Y" / "X takes Y's shift" -> takeover (name X, from Y). Add shift when a clock or shift is named ("at 6pm", "the 10.30 shift").
 - "swapped with" -> swap. "switched / moved to Phase 1 (or VIP)" -> move with queue. "and the 10.30 shift" -> the same move with shift.
+- "X replaces Y" -> takeover with `release: true`; "X covers Y" stays a plain takeover. "Y will do his/her original / own / usual shift" -> move with `shift: "usual"`. A VIP late-shift cover (`cover` kind `late`) automatically sends the sheet's late-shift person back to their usual hours that night (the summary says so), so "X will do the late shift and Y will do their original shift" needs no extra step (sending the second step as well is harmless).
 - "X covers the late shift" -> cover kind late. "X covers the Phase 1 late shift" -> kind phase1. "X moves to Phase 1 because Y is off" -> cover kind p1q.
 - Copy the date words exactly as written ("from coming Monday to Thursday", "20th Nov to 25th Nov", "today and tomorrow"). Never convert them. If there are no dates, use "today".
 - A pronoun (him, her, them) refers to the person named earlier in the same message. If it is unclear who, ask.

@@ -164,11 +164,11 @@ function byKey(list, key) {
 }
 function changeText(c) {
   if (c.type === "queue") return c.name + " to " + (c.queue === "phase1" ? "Phase 1" : c.queue === "vip" ? "VIP" : "Phase 1 and VIP");
-  if (c.type === "takeover") return c.name + " takes over " + c.from + "'s shift";
+  if (c.type === "takeover") return c.name + " takes over " + c.from + "'s shift" + (c.release ? " (they go back to their usual hours)" : "");
   if (c.type === "swap") return c.a + " and " + c.b + " swap shifts";
   if (c.type === "shift") {
     const sh = c.shift || {};
-    return c.name + " to " + (sh.kind === "late" ? "the late shift" : sh.kind === "anchor" ? "anchor shift " + (sh.n + 1) : slotLabel(sh.start) + "–" + slotLabel(sh.start + sh.len));
+    return c.name + " to " + (sh.kind === "late" ? "the late shift" : sh.kind === "usual" ? "their usual hours" : sh.kind === "anchor" ? "anchor shift " + (sh.n + 1) : slotLabel(sh.start) + "–" + slotLabel(sh.start + sh.len));
   }
   return c.type + " change";
 }

@@ -40,8 +40,8 @@ export function applyScenario(page, seed, opts, base) {
       const t = pick(["queue", "shift", "takeover", "swap"]); const id = "chg-fz-" + (n++);
       const rec = { id, cmd: "fz", type: t, by: "Fuzz", via: "test", at: "x" };
       if (t === "queue") { rec.name = pick(names); rec.queue = pick(["phase1", "vip", "both"]); }
-      else if (t === "shift") { rec.name = pick(names); const k = pick(["late", "anchor", "hours"]); rec.shift = k === "late" ? { kind: "late" } : k === "anchor" ? { kind: "anchor", n: Math.floor(r() * 3) } : { kind: "hours", start: Math.floor(r() * 14), len: 18 }; }
-      else if (t === "takeover") { rec.name = pick(names); rec.from = pick(names); if (rec.name === rec.from) continue; if (r() < 0.6) { const k = pick(["late", "anchor", "hours"]); rec.shift = k === "late" ? { kind: "late" } : k === "anchor" ? { kind: "anchor", n: Math.floor(r() * 3) } : { kind: "hours", start: Math.floor(r() * 14), len: 18 }; } }
+      else if (t === "shift") { rec.name = pick(names); const k = pick(["late", "anchor", "hours", "usual"]); rec.shift = k === "usual" ? { kind: "usual" } : k === "late" ? { kind: "late" } : k === "anchor" ? { kind: "anchor", n: Math.floor(r() * 3) } : { kind: "hours", start: Math.floor(r() * 14), len: 18 }; }
+      else if (t === "takeover") { rec.name = pick(names); rec.from = pick(names); if (rec.name === rec.from) continue; if (r() < 0.3) rec.release = true; if (r() < 0.6) { const k = pick(["late", "anchor", "hours"]); rec.shift = k === "late" ? { kind: "late" } : k === "anchor" ? { kind: "anchor", n: Math.floor(r() * 3) } : { kind: "hours", start: Math.floor(r() * 14), len: 18 }; } }
       else { rec.a = pick(names); rec.b = pick(names); if (rec.a === rec.b) continue; }
       (data.changes[key] = data.changes[key] || []).push(rec);
     }

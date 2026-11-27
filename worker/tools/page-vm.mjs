@@ -3,7 +3,8 @@
 import { readFileSync, existsSync } from "node:fs";
 import vm from "node:vm";
 
-export const PAGE_FILE = new URL("../../coverage-calendar.html", import.meta.url);
+// PAGE_FILE=<path> checks another copy of the page (for example public/index.html, the one that is deployed)
+export const PAGE_FILE = process.env.PAGE_FILE ? new URL("file:///" + String(process.env.PAGE_FILE).replaceAll("\\", "/")) : new URL("../../coverage-calendar.html", import.meta.url);
 export const pageExists = () => existsSync(PAGE_FILE);
 
 // anything touched on the stub answers with another stub, so the page's start-up code runs without a DOM
@@ -53,7 +54,7 @@ export function loadPage(nowMs) {
     fetch: () => Promise.reject(new Error("no network in the test")),
     setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0, cancelAnimationFrame() {},
     matchMedia: () => ({ matches: false, addEventListener() {}, addListener() {} }), getComputedStyle: () => ({}),
-    addEventListener() {}, removeEventListener() {}, IntersectionObserver: class { observe() {} disconnect() {} }, ResizeObserver: class { observe() {} disconnect() {} },
+    addEventListener() {}, removeEventListener() {}, IntersectionObserver: class { observe() {} disconnect() {} }, MutationObserver: class { observe() {} disconnect() {} }, ResizeObserver: class { observe() {} disconnect() {} },
     history: { replaceState() {}, pushState() {} }, print() {}, alert() {}, confirm: () => true, prompt: () => null
   };
   ctx.globalThis = ctx;

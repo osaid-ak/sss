@@ -8,13 +8,15 @@
 // Operations:
 //   { op: "off",      people: ["Jawad"], dates, note?, sick? }                  approved leave on those days (sick: true = off sick, shown with a thermometer face)
 //   { op: "back",     people: ["Jawad"], dates }                               cancel leave on those days (the rest of the leave stays)
-//   { op: "takeover", name: "Raza", from: "Jawad", shift?, dates }              Raza works Jawad's queue and shift on those nights; "shift" names
-//                                                                                the shift when it is not Jawad's own that night (the 6pm anchor he left)
+//   { op: "takeover", name: "Raza", from: "Jawad", shift?, release?, dates }    Raza works Jawad's queue and shift on those nights; "shift" names
+//                                                                                the shift when it is not Jawad's own that night (the 6pm anchor he left);
+//                                                                                release: true sends Jawad back to usual hours ("replaces" rather than "covers")
 //   { op: "move",     name: "Jawad", queue?: "phase1"|"vip"|"both", shift?, dates }   other queue and/or other hours on those nights
 //   { op: "swap",     a: "Jawad", b: "Raza", dates }                            the two exchange shifts and queues on those nights
 //   { op: "cover",    kind: "late"|"phase1"|"p1q"|"anchor", name, for?, dates } the calendar's own cover slots (late shift VIP / Phase 1, Phase 1 queue,
 //                                                                                the anchor a late-shift cover or a moved person left)
-// shift: "late", a clock ("10:30", "6pm" = the late shift or the anchor that starts then), { kind, clock }, or hours ("7pm-4am", { from, to }).
+// shift: "late", a clock ("10:30", "6pm" = the late shift or the anchor that starts then), { kind, clock }, hours ("7pm-4am", { from, to }),
+//        or "usual" ("original", "own"): the person's own roster hours, break and split (queue and roles stay) - for move only.
 // dates: text ("20th Nov to 25th Nov", "coming Monday to Thursday"), { text }, { from, to } or { dates: [...] } (see dates.js).
 
 import { makeEngine, coversForDay, slotLabel, dstSlots, nightAnchorKey, ANCHORS, VIP_LATE_LEN, START_MIN, SLOT_MIN, SLOTS, isSaturday, isSunday } from "./covers.js";
@@ -55,6 +57,8 @@ function cleanShiftText(x) {
     .replace(/^(\d{1,2})(\d{2})$/, "$1:$2");
 }
 const qLabel = q => (q === "phase1" ? "Phase 1" : q === "vip" ? "VIP" : "Phase 1 and VIP");
+// "his own", "original", "usual hours", "their usual" ... : the person's own roster shift
+const USUAL = /^(?:(?:his|her|their|my|its)\s+)?(?:usual|original|own|normal|regular|default)(?:\s+hours)?$/;
 
 // "Mon 23 Nov to Wed 25 Nov, Fri 27 Nov": runs of days (a Sunday between two days does not break a run)
 export function describeDates(keys) {
@@ -91,6 +95,8 @@ function shiftFor(spec, key) {
   const anchorMin = n => START_MIN + (ANCHORS[n].start + off) * SLOT_MIN;
   const warn = [];
   let s = spec;
+  if (s && typeof s === "object" && (s.kind === "usual" || (s.clock != null && USUAL.test(cleanShiftText(s.clock))))) return { shift: { kind: "usual" }, warn };
+  if (typeof s === "string" && USUAL.test(cleanShiftText(s))) return { shift: { kind: "usual" }, warn };
   if (typeof s === "string") {
     const t = cleanShiftText(s);
     const range = t.match(/^(.+?)\s*(?:-|–|—|\bto\b|\btill\b|\buntil\b)\s*(.+)$/);
@@ -124,6 +130,7 @@ function shiftFor(spec, key) {
 }
 const shiftLabel = (shift, key) => {
   const off = dstSlots(key);
+  if (shift.kind === "usual") return "usual hours";
   if (shift.kind === "late") return "the late shift " + slotLabel(13 + off) + "–" + slotLabel(13 + off + VIP_LATE_LEN);
   if (shift.kind === "anchor") return "the " + slotLabel(ANCHORS[shift.n].start + off) + "–" + slotLabel(ANCHORS[shift.n].start + off + ANCHORS[shift.n].len) + " shift";
   return slotLabel(shift.start) + "–" + slotLabel(shift.start + shift.len);
@@ -271,14 +278,20 @@ export function planCommand(doc, req, live, nowMs) {
       if (p.name === from.name) throw new OpError("someone cannot take over their own shift");
       if (p.roles && p.roles.lead) throw new OpError(p.name + " is a lead; leads are not used as cover");
       const use = days(op, { saturday: false });
-      const ok = [];
+      const release = op.release === true || op.release === "true";
+      const ok = [], released = [];
       use.forEach(k => {
         if (!working(p.name, k)) { skipped.push(p.name + " is off on " + dayLabel(k) + ", so cannot cover"); return; }
         if (committed(k).has(p.name)) { skipped.push(p.name + " already has a cover or move on " + dayLabel(k)); return; }
         if (working(from.name, k) && op.shift == null) warnings.push(from.name + " is not marked off on " + dayLabel(k));
         let sh = null;
         if (op.shift != null) { const r = shiftFor(op.shift, k); sh = r.shift; r.warn.forEach(w => warnings.push(w)); }
+        if (sh && sh.kind === "usual") throw new OpError("a takeover needs a real shift, not usual hours (use move to put someone back on their usual hours)");
         const rec = sh ? { type: "takeover", name: p.name, from: from.name, shift: sh } : { type: "takeover", name: p.name, from: from.name };
+        if (release) {
+          if (working(from.name, k)) { rec.release = true; released.push(k); }
+          else warnings.push(from.name + " is off on " + dayLabel(k) + ", so there is nothing to release");
+        }
         const fold = linesFold(k);
         if (fold) rec.fold = fold;
         noteLine(withLineMoves(k, () => addChange(k, rec)), k);
@@ -287,6 +300,7 @@ export function planCommand(doc, req, live, nowMs) {
       if (!ok.length) throw new OpError(p.name + " cannot take over " + from.name + "'s shift on any of those days" + why());
       lines.push(p.name + " takes over " + from.name + "'s " + (op.shift != null ? "shift (" + shiftLabel(shiftFor(op.shift, ok[0]).shift, ok[0]).replace(/^the /, "") + ") and queue " : "shift and queue ") + describeDates(ok) + ".");
       flushLineNotes();
+      if (released.length) lines.push(from.name + " goes back to usual hours " + describeDates(released) + ".");
     },
 
     move(op) {
@@ -295,21 +309,34 @@ export function planCommand(doc, req, live, nowMs) {
       if (op.queue != null && !queue) throw new OpError('"' + op.queue + '" is not a queue (Phase 1, VIP or both)');
       if (!queue && op.shift == null) throw new OpError("move " + p.name + " where? give a queue, a shift, or both");
       const use = days(op, { saturday: false });
-      const ok = [], text = [];
+      const ok = [], text = [], already = [];
       use.forEach(k => {
         if (!working(p.name, k)) { skipped.push(p.name + " is off on " + dayLabel(k)); return; }
         let sh = null;
         if (op.shift != null) { const r = shiftFor(op.shift, k); sh = r.shift; r.warn.forEach(w => warnings.push(w)); }
+        if (sh && sh.kind === "usual") {
+          // nothing to record when the night already shows their usual hours (a cover put on the late shift has already sent the sheet's person back)
+          const e = eng(), cur = e.resolveDay(k).people.find(x => x.name === p.name), u = e.rosterUsual(p.name, k);
+          const same = !!cur && !!u && cur.start === u.start && cur.len === u.len && cur.brk === u.brk && JSON.stringify(cur.split || null) === JSON.stringify(u.split || null);
+          if (same) { sh = null; if (!queue) { already.push(k); return; } }
+        }
         if (queue) addChange(k, { type: "queue", name: p.name, queue });
         if (sh) addChange(k, { type: "shift", name: p.name, shift: sh });
         ok.push(k);
         if (sh && !text.length) text.push(shiftLabel(sh, k));
       });
-      if (!ok.length) throw new OpError("nothing to change for " + p.name + why());
-      const bits = [];
-      if (queue) bits.push("to " + qLabel(queue));
-      if (op.shift != null) bits.push("to " + (text[0] || "the new shift"));
-      lines.push(p.name + " moved " + bits.join(" and ") + " " + describeDates(ok) + ".");
+      if (!ok.length && !already.length) throw new OpError("nothing to change for " + p.name + why());
+      if (already.length) {
+        skipped.push(p.name + " is already on usual hours " + describeDates(already));
+        lines.push(p.name + " is already on usual hours " + describeDates(already) + ".");
+      }
+      if (ok.length) {
+        const bits = [];
+        if (queue) bits.push("to " + qLabel(queue));
+        if (op.shift != null && text.length) bits.push("to " + text[0]);
+        if (!queue && text[0] === "usual hours") lines.push(p.name + " works usual hours " + describeDates(ok) + ".");
+        else lines.push(p.name + " moved " + (bits.join(" and ") || "to the new shift") + " " + describeDates(ok) + ".");
+      }
     },
 
     swap(op) {
@@ -387,6 +414,12 @@ export function planCommand(doc, req, live, nowMs) {
       if (!ok.length) throw new OpError(p.name + " cannot be used as that cover on any of those days" + why());
       const what = kind === "late" ? "the VIP late shift" : kind === "phase1" ? "the Phase 1 late shift" : kind === "p1q" ? "Phase 1 (from VIP)" : (forP ? forP.name + "'s anchor shift" : "the anchor shift");
       lines.push(p.name + " covers " + what + " " + describeDates(ok) + ".");
+      if (kind === "late") {
+        // the sheet's Late Shift person is sent back to usual hours on the nights this covers (see covers.js lateReleased)
+        const e = eng(), freed = new Map();
+        ok.forEach(k => { if (e.lateReleased(k)) { const n = e.vipBlockFor(k).late; (freed.get(n) || freed.set(n, []).get(n)).push(k); } });
+        freed.forEach((keys, n) => lines.push(n + " (the sheet's late-shift person) goes back to usual hours " + describeDates(keys) + "."));
+      }
     }
   };
 

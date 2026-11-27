@@ -386,9 +386,22 @@ const cvPlan = intercomPlan({ updatedAt: "x", calendar: coverCal }, "2026-11-16"
 const cv = d => cvPlan.days.find(x => x.date === d);
 const texts = d => cv(d).covers.map(c => c.text);
 check("away: approved leave and confirmed holiday offs count, pending leave and draft plans do not", cv("2026-11-17").away.map(a => a.name + ":" + a.kind).join() === "Ammana:pto" && cv("2026-11-18").away.map(a => a.name).join() === "Laraib" && cv("2026-11-19").away.map(a => a.name + ":" + a.kind).join() === "Ivan:off,Qasim:pto" && cv("2026-11-20").away.length === 0);
+// wording: "covering X" names only the absent people who hold the role being covered (Schanzae is Phase 1 and off; the VIP late shift is not hers)
+const schCal = {
+  people: [CP("Schanzae", { start: 13, roles: { phase1: true }, queue: "phase1", group: "Phase 1" }), CP("Ammana"), CP("Raza", { start: 4, brk: 12 })],
+  vipPlan: { blocks: [], readAt: "x" },
+  leaves: [{ id: "s1", name: "Schanzae", start: "2026-11-30", end: "2026-12-01", status: "approved" }],
+  holidays: [], lateCover: { "2026-11-30": { vip: "Ammana", phase1: "Raza" } },
+  sheetPlan: { hours: {}, line: [], readAt: "x" }, days: {}, lineBars: []
+};
+const schPlan = intercomPlan({ updatedAt: "x", calendar: schCal }, "2026-11-30", 2, Date.parse("2026-11-28T10:00:00Z"), { live: null, emails: [] });
+const sch = d => schPlan.days.find(x => x.date === d);
+check("a VIP late-shift cover is not said to cover an absent Phase 1 person", sch("2026-11-30").covers.some(c => c.text === "Ammana is covering the VIP late shift 10:30pm–7:30am."));
+check("...while the Phase 1 late-shift cover still names who is off", sch("2026-11-30").covers.some(c => c.text === "Raza is covering Schanzae on the Phase 1 late shift 10:30pm–7:30am."));
+check("a missing VIP person is not blamed on a Phase 1 person who is off, a missing Phase 1 person is", sch("2026-12-01").needsCover.some(n => n.kind === "late" && n.text === "Late shift 10:30pm–7:30am needs a VIP person.") && sch("2026-12-01").needsCover.some(n => n.kind === "late" && n.text === "Late shift 10:30pm–7:30am needs a Phase 1 person. Schanzae is off."));
 check("anchor cover: the vacated 6pm-3am shift of the Late Shift person is covered by Anchor Cover 1, with the times", texts("2026-11-16").includes("Zarminay is covering Raza on the 6pm–3am VIP shift.") && cv("2026-11-16").covers.find(c => c.kind === "anchor").from === "6pm" && cv("2026-11-16").covers.find(c => c.kind === "anchor").to === "3am");
 const lateCover = cv("2026-11-17").covers.find(c => c.kind === "late");
-check("late shift cover: who, what and the exact times (PKT, and as UTC instants)", lateCover.name === "Ivan" && lateCover.text === "Ivan is covering the VIP late shift 10:30pm–7:30am." && lateCover.from === "10:30pm" && lateCover.to === "7:30am" && lateCover.fromAt === "2026-11-17T17:30:00.000Z" && lateCover.toAt === "2026-11-18T02:30:00.000Z");
+check("late shift cover: who, what and the exact times (PKT, and as UTC instants)", lateCover.name === "Ivan" && lateCover.text === "Ivan is covering Raza on the VIP late shift 10:30pm–7:30am." && lateCover.from === "10:30pm" && lateCover.to === "7:30am" && lateCover.fromAt === "2026-11-17T17:30:00.000Z" && lateCover.toAt === "2026-11-18T02:30:00.000Z");
 check("Phase 1 queue cover names the rotation person it replaces", texts("2026-11-17").includes("Ayeshah is covering Jawad on Phase 1."));
 check("Support Line: the sheet's backup takes the slot of an owner who is off, and says how the shift moved", texts("2026-11-18").includes("Ivan is covering Laraib on Support Line 6pm–10pm. Ivan's shift was adjusted to 6pm–3am to cover the Support Line."));
 check("needs cover: a late shift without a Phase 1 person, an uncovered anchor, and a Support Line slot nobody can take", cv("2026-11-19").needsCover.some(n => n.kind === "late" && /needs a Phase 1 person/.test(n.text)) && cv("2026-11-19").needsCover.some(n => n.kind === "anchor" && /Anchor 2 on the VIP Coverage Plan sheet/.test(n.text)) && cv("2026-11-19").needsCover.some(n => n.kind === "line" && n.text === "Support Line 10pm–1am owner Qasim is off. Backup Ivan is off too."));
@@ -434,7 +447,7 @@ check("break rotations: on the nights of a block the listed people break when th
 const lineCal = { people: [CP("Solo", { roles: { vip: true, line: true } })], vipPlan: { blocks: [], readAt: "x" }, leaves: [], holidays: [], lateCover: {}, days: {}, changes: {}, lineBars: [{ owner: "Solo", start: 6, len: 8 }], sheetPlan: { hours: {}, line: [], readAt: "x" } };
 const lineDay = intercomPlan({ updatedAt: "x", calendar: lineCal }, "2026-11-17", 1, Date.parse("2026-11-16T10:00:00Z"), { live: null, emails: [] }).days[0];
 check("Support Line: a stretch with nobody on the line is a need, worded for leads (the person's own break, and the hours nobody is scheduled)", lineDay.needsCover.some(n => n.kind === "line" && /^Support Line has nobody .+–.+\. Adjust breaks or add cover\.$/.test(n.text)));
-check("late-shift cover by someone who works an anchor shift: the anchor they leave is covered by the lead's pick, named with its times", texts("2026-11-23").includes("Zarminay is covering Osaid on the 5pm–2am VIP shift.") && !cv("2026-11-23").needsCover.some(n => /Osaid/.test(n.text)) && texts("2026-11-23").includes("Osaid is covering the VIP late shift 10:30pm–7:30am."));
+check("late-shift cover by someone who works an anchor shift: the anchor they leave is covered by the lead's pick, named with its times", texts("2026-11-23").includes("Zarminay is covering Osaid on the 5pm–2am VIP shift.") && !cv("2026-11-23").needsCover.some(n => /Osaid/.test(n.text)) && texts("2026-11-23").includes("Osaid is covering Raza on the VIP late shift 10:30pm–7:30am."));
 check("...and until a lead picks someone it is an open need, worded like the calendar's alert", cv("2026-11-25").needsCover.some(n => n.kind === "anchor" && n.text === "Anchor shift 5pm–2am VIP is uncovered. Osaid is covering the late shift."));
 check("a late-shift cover who does not work an anchor shift leaves nothing open (Ivan on 17 Nov)", !cv("2026-11-17").needsCover.some(n => /covering the late shift/.test(n.text)));
 check("Saturday: only the weekend names can be away, no covers; Sunday: nothing", cv("2026-11-21").covers.length === 0 && cv("2026-11-21").needsCover.length === 0 && cv("2026-11-22").covers.length === 0 && cv("2026-11-22").away.length === 0);
@@ -575,6 +588,7 @@ import { readFileSync } from "node:fs";
 const golden = JSON.parse(readFileSync(new URL("../handoff/slack-calendar/golden.json", import.meta.url), "utf8"));
 const goldenBad = golden.filter(g => {
   const r = cmd(g.ops);
+  if (g.ok && r.ok && Array.isArray(g.expect) && !g.expect.every(t => r.result.summary.join(" ").includes(t))) return true;
   return g.ok ? !(r.ok && r.result.summary.length) : r.ok;
 });
 check("golden phrases for the Slack side (" + golden.length + "): each is accepted, or refused for its stated reason", goldenBad.length === 0 && golden.length >= 25);
@@ -636,6 +650,112 @@ check("write API: a write made from an old version is refused (409), one made fr
 delete env.WRITE_KEYS; delete env.TEST_TODAY;
 delete env.API_KEYS;
 check("with no keys configured every call is refused", (await keyed("/api/v1/intercom-plan", "key-for-intercom-123")).status === 401);
+
+// 10. a late cover releases the sheet's late person, "usual hours" for move, takeover with release, and the swap tag
+{
+  const { coversForDay } = await import("./src/covers.js");
+  const RP = (name, extra) => CMD(name, extra);
+  const relCal = {
+    people: [RP("Zarminay"), RP("Ammana"), RP("Ivan"), RP("Raza", { start: 4, brk: 12 }), RP("Jawad", { start: 8, brk: 16 }), RP("Osaid", { start: 2, brk: 10, roles: { lead: true, vip: true } }),
+      RP("Ayeshah", { roles: { phase1: true }, queue: "phase1", group: "Phase 1" }), RP("Schanzae", { roles: { phase1: true }, queue: "phase1", group: "Phase 1", start: 15, len: 18, brk: 22 })],
+    vipPlan: { blocks: [{ start: "2026-11-30", end: "2026-12-04", late: "Zarminay", phase1: "Jawad", cover1: "", cover2: "" }, { start: "2027-07-12", end: "2027-07-16", late: "Zarminay", phase1: "Jawad", cover1: "", cover2: "" }], readAt: "x" },
+    leaves: [], holidays: [], lateCover: {}, days: {}, changes: {}, lineBars: [], sheetPlan: { hours: {}, line: [] }
+  };
+  const relDoc = { updatedAt: "2026-11-28T00:00:00.000Z", calendar: relCal };
+  const NOWR = Date.parse("2026-11-28T05:00:00Z");
+  const runR = (ops, doc, today) => planCommand(doc || relDoc, { commandId: "c-rel", today: today || "2026-11-28", actor: { email: "ann@example.com" }, ops }, null, NOWR);
+  const eng = cal => makeEngine(cal, null, NOWR);
+  const pr = (cal, k, n) => eng(cal).resolveDay(k).people.find(p => p.name === n);
+  const cvr = (cal, k) => coversForDay(eng(cal), k, []);
+  const rotR = (cal, k) => { const e = eng(cal); return e.coveringFor(k, e.resolveDay(k)).rotation; };
+  const roster = n => relCal.people.find(p => p.name === n);
+  const LATE = 15; // 10:30pm on the standard clock
+
+  // A1: the real command, "ammana will do the late shift next week"
+  const a1 = runR([{ op: "cover", kind: "late", name: "Ammana", dates: "next week" }]);
+  check("A1: the preview is accepted and says the sheet's late-shift person goes back to usual hours", a1.ok && a1.result.summary.some(l => /Zarminay \(the sheet's late-shift person\) goes back to usual hours Mon 30 Nov to Fri 4 Dec\./.test(l)));
+  check("A1: Ammana works the late shift 10:30pm-7:30am and Zarminay works their usual hours (roster 6 + 2 for the clock change, own break)", ["2026-11-30", "2026-12-04"].every(k => pr(a1.cal, k, "Ammana").start === LATE && pr(a1.cal, k, "Ammana").len === 18 && pr(a1.cal, k, "Zarminay").start === roster("Zarminay").start + 2 && pr(a1.cal, k, "Zarminay").brk === roster("Zarminay").brk + 2));
+  check("A1: the sentence names who Ammana covers, and no late-shift alert is raised", cvr(a1.cal, "2026-11-30").covers.some(c => c.text === "Ammana is covering Zarminay on the VIP late shift 10:30pm–7:30am.") && !cvr(a1.cal, "2026-11-30").needsCover.some(n => n.kind === "late"));
+  check("A1: Zarminay carries no (Late Shift) tag and no 'working other hours' entry while Ammana has the shift", !cvr(a1.cal, "2026-11-30").covers.some(c => c.name === "Zarminay") && !rotR(a1.cal, "2026-11-30").some(r => r.name === "Zarminay"));
+  check("A1: the night before the block is untouched, and the block's Phase 1 person still moves to Phase 1", pr(a1.cal, "2026-12-01", "Jawad").roles.phase1 === true && !a1.result.dates.includes("2026-11-29"));
+  // A2: the sheet's person is off that night: unchanged, they stay off and the sentence names them
+  const offCal = clone(relCal); offCal.leaves = [{ id: "z1", name: "Zarminay", start: "2026-11-30", end: "2026-12-01", status: "approved" }];
+  const a2 = runR([{ op: "cover", kind: "late", name: "Ammana", dates: "next week" }], { updatedAt: "x", calendar: offCal });
+  check("A2: Zarminay off Mon-Tue: not released, the sentence names them; from Wed they are released and the sentence has no 'for'", a2.ok && pr(a2.cal, "2026-11-30", "Zarminay").start === LATE && cvr(a2.cal, "2026-11-30").covers.some(c => c.text === "Ammana is covering Zarminay on the VIP late shift 10:30pm–7:30am.") && !a2.result.summary.some(l => /goes back to usual hours Mon 30 Nov/.test(l)) && pr(a2.cal, "2026-12-02", "Zarminay").start === roster("Zarminay").start + 2);
+  // A3: the cover is the sheet's late person: nothing changes
+  const a3 = runR([{ op: "cover", kind: "late", name: "Zarminay", dates: "next week" }]);
+  check("A3: the sheet's own late person as cover: no release, no summary line about usual hours", a3.ok && !a3.result.summary.some(l => /usual hours/.test(l)) && pr(a3.cal, "2026-11-30", "Zarminay").start === LATE && !eng(a3.cal).lateReleased("2026-11-30"));
+  // A4: undo
+  const u4 = undoCommand({ updatedAt: "x", calendar: a1.cal }, { undo: a1.undo, summary: a1.result.summary }, NOWR);
+  check("A4: undo puts Zarminay back on the late hours", pr(u4.cal, "2026-11-30", "Zarminay").start === LATE && !pr(u4.cal, "2026-11-30", "Ammana") .roles.phase1 && pr(u4.cal, "2026-11-30", "Ammana").start === roster("Ammana").start + 2);
+  // A5: a stored cover replaced
+  const withIvan = clone(relCal); withIvan.lateCover = { "2026-11-30": { vip: "Ivan" } };
+  const a5a = runR([{ op: "cover", kind: "late", name: "Ammana", dates: "2026-11-30" }], { updatedAt: "x", calendar: withIvan });
+  check("A5: another cover already stored is refused without 'replace'", !a5a.ok && /already has Ivan/.test(a5a.errors.join(" ")));
+  const a5 = runR([{ op: "cover", kind: "late", name: "Ammana", replace: true, dates: "2026-11-30" }], { updatedAt: "x", calendar: withIvan });
+  check("A5: 'replace' swaps the stored cover; Ivan and Zarminay are both on usual hours", a5.ok && pr(a5.cal, "2026-11-30", "Ammana").start === LATE && pr(a5.cal, "2026-11-30", "Ivan").start === roster("Ivan").start + 2 && pr(a5.cal, "2026-11-30", "Zarminay").start === roster("Zarminay").start + 2);
+  // the cover is off after being added (leave added later): the sheet's person keeps the shift, so the late shift is not left empty
+  const gone = clone(a1.cal); gone.leaves = [{ id: "g1", name: "Ammana", start: "2026-12-01", end: "2026-12-01", status: "approved" }];
+  check("A: a cover who is later marked off does not release the sheet's person (the late shift stays held)", pr(gone, "2026-12-01", "Zarminay").start === LATE && !eng(gone).lateReleased("2026-12-01") && pr(gone, "2026-11-30", "Zarminay").start !== LATE);
+  // the other clock: the same block in summer time
+  const sum = runR([{ op: "cover", kind: "late", name: "Ammana", dates: "2027-07-13" }], relDoc, "2027-07-10");
+  check("A: across the clock change (13 Jul 2027) the cover works 9:30pm and Zarminay their roster hours with no offset", sum.ok && pr(sum.cal, "2027-07-13", "Ammana").start === 13 && pr(sum.cal, "2027-07-13", "Zarminay").start === roster("Zarminay").start && cvr(sum.cal, "2027-07-13").covers.some(c => c.text === "Ammana is covering Zarminay on the VIP late shift 9:30pm–6:30am."));
+  // anchor: the released person works their own anchor shift again, so it is no longer vacated
+  const ancCal = clone(relCal); ancCal.vipPlan.blocks[0].late = "Raza";
+  const before = cvr(ancCal, "2026-11-30");
+  const aa = runR([{ op: "cover", kind: "late", name: "Ivan", dates: "2026-11-30" }], { updatedAt: "x", calendar: ancCal });
+  check("A: the late person's own anchor shift (Raza, 6pm-3am) is open until released, and not after (no alert, Raza on their own hours)", before.needsCover.some(n => n.kind === "anchor" && /Anchor shift 6pm–3am/.test(n.text)) && aa.ok && !cvr(aa.cal, "2026-11-30").needsCover.some(n => /Anchor shift 6pm–3am/.test(n.text)) && pr(aa.cal, "2026-11-30", "Raza").start === roster("Raza").start + 2);
+  // the Slack-side compound command: the cover and "zarminay will do their original shift" in one go
+  const comp = runR([{ op: "cover", kind: "late", name: "Ammana", dates: "next week" }, { op: "move", name: "Zarminay", shift: "original", dates: "next week" }]);
+  check("A+D: cover and 'original shift' together succeed and say Zarminay is already on usual hours (nothing stored that outlives the cover)", comp.ok && Object.keys(comp.cal.changes).length === 0 && comp.result.summary.some(l => /Zarminay is already on usual hours/.test(l)));
+  const comp2 = runR([{ op: "move", name: "Zarminay", shift: "usual", dates: "next week" }, { op: "cover", kind: "late", name: "Ammana", dates: "next week" }]);
+  check("A+D: the other order works too and leaves Zarminay on usual hours", comp2.ok && pr(comp2.cal, "2026-12-01", "Zarminay").start === roster("Zarminay").start + 2 && pr(comp2.cal, "2026-12-01", "Ammana").start === LATE);
+
+  // D: "usual hours" for move
+  const d1 = runR([{ op: "move", name: "Zarminay", shift: "usual", dates: "next week" }]);
+  check("D: moving the sheet's late person to usual hours with no cover leaves the late shift without a VIP person (the calendar says so)", d1.ok && pr(d1.cal, "2026-11-30", "Zarminay").start === roster("Zarminay").start + 2 && d1.result.summary.some(l => /Zarminay works usual hours Mon 30 Nov to Fri 4 Dec\./.test(l)) && d1.result.needsCover.some(n => n.kind === "late" && /needs a VIP person/.test(n.text)));
+  check("D: 'his own shift', 'original', 'own', 'their usual hours' and { kind: usual } are all the same word", ["his own shift", "original", "own", "their usual hours", "the usual shift", { kind: "usual" }, { clock: "usual" }].every(sh => { const r = runR([{ op: "move", name: "Zarminay", shift: sh, dates: "2026-11-30" }]); return r.ok && r.cal.changes["2026-11-30"].some(c => c.shift && c.shift.kind === "usual"); }));
+  const d2 = runR([{ op: "move", name: "Ivan", shift: "late", dates: "2026-11-30" }, { op: "move", name: "Ivan", shift: "usual", dates: "2026-11-30" }]);
+  check("D: after a move to the late shift, 'usual' puts the hours, break and split back and keeps the queue", d2.ok && pr(d2.cal, "2026-11-30", "Ivan").start === roster("Ivan").start + 2 && pr(d2.cal, "2026-11-30", "Ivan").brk === roster("Ivan").brk + 2 && pr(d2.cal, "2026-11-30", "Ivan").roles.vip === true);
+  const d3 = runR([{ op: "move", name: "Ivan", queue: "phase1", shift: "late", dates: "2026-11-30" }, { op: "move", name: "Ivan", shift: "usual", dates: "2026-11-30" }]);
+  check("D: usual changes hours only: Ivan stays on Phase 1", d3.ok && pr(d3.cal, "2026-11-30", "Ivan").roles.phase1 === true && pr(d3.cal, "2026-11-30", "Ivan").start === roster("Ivan").start + 2);
+  const d4 = runR([{ op: "move", name: "Ivan", shift: "usual", dates: "2026-11-30" }]);
+  check("D: a person already on usual hours is a clear 'nothing changes', not an empty change", !d4.ok && /already on usual hours/.test(d4.errors.join(" ")));
+  const d5 = runR([{ op: "takeover", name: "Ivan", from: "Zarminay", shift: "usual", dates: "2026-11-30" }]);
+  check("D: a takeover cannot be given 'usual hours'", !d5.ok && /not usual hours/.test(d5.errors.join(" ")));
+  const d6 = runR([{ op: "move", name: "Ivan", shift: "usual", dates: "2027-07-13" }, ], relDoc, "2027-07-10");
+  const d7 = runR([{ op: "move", name: "Ivan", shift: "late", dates: "2027-07-13" }, { op: "move", name: "Ivan", shift: "usual", dates: "2027-07-13" }], relDoc, "2027-07-10");
+  check("D: in summer time usual is the roster hours with no offset", !d6.ok && d7.ok && pr(d7.cal, "2027-07-13", "Ivan").start === roster("Ivan").start);
+  const d8 = runR([{ op: "move", name: "Zarminay", shift: "usual", dates: "2026-12-01" }]);
+  const d8u = undoCommand({ updatedAt: "x", calendar: d8.cal }, { undo: d8.undo, summary: d8.result.summary }, NOWR);
+  check("D: undo removes the change and the night follows the sheet again", pr(d8u.cal, "2026-12-01", "Zarminay").start === LATE && Object.keys(d8u.cal.changes).length === 0);
+
+  // E: takeover with release
+  const e1 = runR([{ op: "takeover", name: "Ammana", from: "Zarminay", release: true, dates: "next week" }]);
+  const e0 = runR([{ op: "takeover", name: "Ammana", from: "Zarminay", dates: "next week" }]);
+  check("E: without release both people hold the late shift (what the brief describes)", e0.ok && pr(e0.cal, "2026-11-30", "Zarminay").start === LATE && pr(e0.cal, "2026-11-30", "Ammana").start === LATE);
+  check("E: with release Ammana takes the late shift and Zarminay goes back to usual hours, and the summary says so", e1.ok && pr(e1.cal, "2026-11-30", "Ammana").start === LATE && pr(e1.cal, "2026-11-30", "Zarminay").start === roster("Zarminay").start + 2 && e1.result.summary.some(l => /Zarminay goes back to usual hours Mon 30 Nov to Fri 4 Dec\./.test(l)));
+  check("E: the release is stored on the change, shows no (Late Shift) tag for the released person, and raises no late-shift alert", e1.cal.changes["2026-11-30"][0].release === true && !rotR(e1.cal, "2026-11-30").some(r => r.name === "Zarminay") && !cvr(e1.cal, "2026-11-30").needsCover.some(n => n.kind === "late"));
+  const e2 = runR([{ op: "takeover", name: "Ammana", from: "Zarminay", release: true, dates: "next week" }], { updatedAt: "x", calendar: offCal });
+  check("E: Zarminay off Mon-Tue: nothing to release there (warned), released from Wed", e2.ok && e2.result.warnings.some(w => /nothing to release/.test(w)) && pr(e2.cal, "2026-12-02", "Zarminay").start === roster("Zarminay").start + 2);
+  const e3u = undoCommand({ updatedAt: "x", calendar: e1.cal }, { undo: e1.undo, summary: e1.result.summary }, NOWR);
+  check("E: undo takes the release back with the takeover", pr(e3u.cal, "2026-11-30", "Zarminay").start === LATE && Object.keys(e3u.cal.changes).length === 0);
+
+  // cover tags: the late-shift cover reads "Covering - Late Shift", the Phase 1 covers "Covering - Phase 1", other covers plain "Covering"
+  const tg = (cal, k, n) => (cvr(cal, k).covers.find(c => c.name === n) || {}).tag;
+  check("cover tag: the VIP late-shift cover reads 'Covering - Late Shift'", tg(a1.cal, "2026-11-30", "Ammana") === "Covering - Late Shift");
+  const ph = runR([{ op: "cover", kind: "phase1", name: "Ayeshah", dates: "2026-12-01" }, { op: "cover", kind: "p1q", name: "Ivan", dates: "2026-12-02" }]);
+  check("cover tag: the Phase 1 late-shift cover and the VIP rep moved to Phase 1 read 'Covering - Phase 1'", ph.ok && tg(ph.cal, "2026-12-01", "Ayeshah") === "Covering - Phase 1" && tg(ph.cal, "2026-12-02", "Ivan") === "Covering - Phase 1");
+  check("cover tag: a takeover and an hours cover keep plain 'Covering' (no tag field)", tg(e1.cal, "2026-11-30", "Ammana") === undefined);
+  // the swap tag: what the person now works
+  const sp = runR([{ op: "swap", a: "Ayeshah", b: "Ivan", dates: "2026-12-01" }]);
+  const tagOf = (r, n) => (cvr(r.cal, "2026-12-01").covers.find(c => c.name === n) || {}).tag;
+  check("swap tag: a VIP rep swapped into a Phase 1 shift reads 'Swap - Phase 1', the Phase 1 rep who took the VIP shift reads plain 'Swap'", sp.ok && tagOf(sp, "Ivan") === "Swap - Phase 1" && tagOf(sp, "Ayeshah") === "Swap" && cvr(sp.cal, "2026-12-01").covers.find(c => c.name === "Ivan").label === "Swap");
+  const sl = runR([{ op: "swap", a: "Zarminay", b: "Ivan", dates: "2026-12-01" }]);
+  check("swap tag: the person who now works the late shift reads 'Swap - Late Shift' (the other one plain 'Swap'); the hover text is the swap sentence", sl.ok && tagOf(sl, "Ivan") === "Swap - Late Shift" && tagOf(sl, "Zarminay") === "Swap" && /swapped shifts with Zarminay: working 10:30pm–7:30am/.test(cvr(sl.cal, "2026-12-01").covers.find(c => c.name === "Ivan").text));
+  const sv = runR([{ op: "swap", a: "Ivan", b: "Raza", dates: "2026-12-01" }]);
+  check("swap tag: two VIP reps on ordinary shifts stay '(Swap)'", sv.ok && tagOf(sv, "Ivan") === "Swap" && tagOf(sv, "Raza") === "Swap");
+}
 
 console.log(failed ? failed + " failed" : "all passed");
 process.exit(failed ? 1 : 0);

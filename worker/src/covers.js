@@ -162,6 +162,7 @@ export function makeEngine(cal, live, nowMs) {
   const queueFlags = q => (q === "phase1" ? { phase1: true, vip: false } : q === "vip" ? { vip: true, phase1: false } : { vip: true, phase1: true });
   function changeHours(key, shift) {
     const off = dstSlots(key);
+    if (shift.kind === "usual") return null;
     if (shift.kind === "late") return { start: lateStartFor(key), len: VIP_LATE_LEN };
     if (shift.kind === "anchor") { const a = ANCHORS[shift.n]; return a ? { start: a.start + off, len: a.len } : null; }
     return Number.isFinite(shift.start) && Number.isFinite(shift.len) ? { start: shift.start, len: shift.len } : null;
@@ -193,7 +194,7 @@ export function makeEngine(cal, live, nowMs) {
     });
   }
   const barsSig = bars => JSON.stringify((bars || []).map(b => [b.owner, b.start, b.len]));
-  function applyChanges(people, key, only, lineBars) {
+  function applyChanges(people, key, only, lineBars, usual) {
     const moved = new Set();
     const orig = {};
     people.forEach(x => { orig[x.name] = { start: x.start, len: x.len, brk: x.brk, split: x.split ? clone(x.split) : null }; });
@@ -205,7 +206,11 @@ export function makeEngine(cal, live, nowMs) {
         if (p) p.roles = Object.assign({}, rolesOf(p), queueFlags(c.queue));
       } else if (c.type === "shift") {
         const p = find(c.name), h = c.shift && changeHours(key, c.shift);
-        if (p && h) takeHours(p, h);
+        if (p && c.shift && c.shift.kind === "usual") {
+          // their own (roster) hours, break and split; the queue stays as it is
+          const u = rosterUsual(c.name, key);
+          if (u) { applyHoursToPerson(p, u.start, u.len, u.brk); p.split = u.split ? clone(u.split) : null; }
+        } else if (p && h) takeHours(p, h);
       } else if (c.type === "takeover") {
         const p = find(c.name), from = find(c.from);
         if (!p || !from || p === from) return;
@@ -215,6 +220,12 @@ export function makeEngine(cal, live, nowMs) {
         const holder = h && !(h.start === o.start && h.len === o.len) && Object.keys(orig).map(n => orig[n]).find(x => x.start === h.start && x.len === h.len);
         if (holder) takeWhole(p, holder, null || h); else takeWhole(p, o, h);
         if (!h || (h.start === o.start && h.len === o.len)) { moved.add(c.id); if (lineBars) moveLine(c, people, lineBars); }
+        // "replaces": the covered person goes back to the hours they would have without the block, cover or sheet change that put them there
+        if (c.release === true && usual && usual[c.from]) {
+          const u = usual[c.from];
+          applyHoursToPerson(from, u.start, u.len, u.brk);
+          from.split = u.split ? clone(u.split) : null;
+        }
         // the anchor shifts are VIP seats; any other shift keeps the queue of the person being covered
         p.roles = Object.assign({}, rolesOf(p), c.shift && c.shift.kind === "anchor" ? { phase1: false, vip: true } : { phase1: r.phase1, vip: r.vip });
       } else if (c.type === "swap") {
@@ -277,12 +288,33 @@ export function makeEngine(cal, live, nowMs) {
     });
     lineBars.splice(0, lineBars.length, ...bars);
   }
+  // The sheet's Late Shift person is released for a night when a lead puts somebody else on the VIP late shift (and both are working that night):
+  // they work their usual hours, not the late hours. A cover person who is off, or a Late Shift person who is off, changes nothing.
+  function lateReleased(key) {
+    const blk = vipBlockFor(key), cov = lateCoverFor(key);
+    return !!(blk && blk.late && cov && cov.vip && cov.vip !== blk.late && !isHolidayAway(blk.late, key) && !onLeave(blk.late, key) && !isHolidayAway(cov.vip, key) && !onLeave(cov.vip, key));
+  }
+  // released by a cover, or by a takeover a command made with release: the person keeps no rotation tag and their own anchor shift is not vacated
+  function lateFree(key) {
+    const blk = vipBlockFor(key);
+    if (!blk || !blk.late) return false;
+    if (lateReleased(key)) return true;
+    return !isHolidayAway(blk.late, key) && !onLeave(blk.late, key) && changesFor(key).some(c => c.type === "takeover" && c.release === true && c.from === blk.late);
+  }
+  // a person's roster hours on a night (with the clock change), what "their usual shift" means to a command
+  function rosterUsual(name, key) {
+    const r = roster.find(x => x.name === name);
+    if (!r) return null;
+    const u = clone(r), off = dstSlots(key);
+    if (off) shiftPersonClock(u, off);
+    return u;
+  }
   function applyVipBlock(people, key) {
     const blk = vipBlockFor(key);
     if (!blk) return;
     const off = dstSlots(key);
     people.forEach(p => {
-      if (blk.late && p.name === blk.late) {
+      if (blk.late && p.name === blk.late && !lateReleased(key)) {
         const start = VIP_LATE_START + off;
         p.split = null;
         applyHoursToPerson(p, start, VIP_LATE_LEN, start + LATE_BRK_REL);
@@ -346,11 +378,14 @@ export function makeEngine(cal, live, nowMs) {
       people.forEach(p => shiftPersonClock(p, off));
       lineBars.forEach(b => shiftBarClock(b, off));
     }
+    // the night as the sheet alone gives it (before the block, covers and changes): what a command's "replaces" sends the covered person back to
+    const usual = {};
+    people.forEach(p => { usual[p.name] = { start: p.start, len: p.len, brk: p.brk, split: p.split ? clone(p.split) : null }; });
     applyVipBlock(people, key);
     applyAnchorCover(people, key);
     applyHolidayHours(people, key);
     applyLateCover(people, key);
-    const lineMoved = applyChanges(people, key, opts && opts.onlyChanges, lineBars);
+    const lineMoved = applyChanges(people, key, opts && opts.onlyChanges, lineBars, usual);
     if (edits) {
       applyEdits(people, dropFoldedEdits(edits.ovr, changesFor(key)));
       if (edits.lines) {
@@ -433,7 +468,7 @@ export function makeEngine(cal, live, nowMs) {
       const a = ANCHORS.find(x => x.start === p.start && x.len === p.len);
       if (a) gaps.push({ kind, person: name, start: a.start + off, len: a.len, brk: p.brk - p.start, block, note });
     };
-    if (blk) [["late", blk.late], ["phase1", blk.phase1]].forEach(([kind, name]) => add(kind, name, blk.start));
+    if (blk) [["late", lateFree(key) ? null : blk.late], ["phase1", blk.phase1]].forEach(([kind, name]) => add(kind, name, blk.start));
     if (cov) [cov.vip, cov.phase1].forEach(name => add("cover", name, key, name + " is covering the late shift."));
     // someone a command moves off their own anchor shift leaves it open as well (a swap leaves nothing open)
     changesFor(key).forEach(c => {
@@ -578,6 +613,8 @@ export function makeEngine(cal, live, nowMs) {
     return true;
   }
   const span = (s, l) => slotLabel(s) + "–" + slotLabel(s + l);
+  // a swap tag says what the person now works when that is the Phase 1 queue or the late shift
+  const swapTag = (p, key) => (p.len === VIP_LATE_LEN && p.start === lateStartFor(key) ? "Swap - Late Shift" : queueFromRoles(rolesOf(p)) === "phase1" ? "Swap - Phase 1" : "Swap");
 
   // Who is covering whom, and for what (the page's coveringFor). Each entry also carries its slots (`lo`, `hi`) for the times.
   function coveringFor(key, day) {
@@ -589,14 +626,14 @@ export function makeEngine(cal, live, nowMs) {
     const st = lateStatus(day.people, day.away, key);
     const absentFor = kind => {
       const same = st.absent.filter(n => { const p = day.people.find(x => x.name === n); return p && rolesOf(p)[kind]; });
-      return (same.length ? same : st.absent).join(", ");
+      return same.join(", ");
     };
     const lateLo = lateStartFor(key), lateHi = lateLo + VIP_LATE_LEN;
-    if (c.vip) out.push({ name: c.vip, kind: "late", for: absentFor("vip"), what: "the VIP late shift " + range, lo: lateLo, hi: lateHi });
-    if (c.phase1) out.push({ name: c.phase1, kind: "late", for: absentFor("phase1"), what: "the Phase 1 late shift " + range, lo: lateLo, hi: lateHi });
+    if (c.vip) out.push({ name: c.vip, kind: "late", tag: "Covering - Late Shift", for: lateReleased(key) ? blk.late : absentFor("vip"), what: "the VIP late shift " + range, lo: lateLo, hi: lateHi });
+    if (c.phase1) out.push({ name: c.phase1, kind: "late", tag: "Covering - Phase 1", for: absentFor("phase1"), what: "the Phase 1 late shift " + range, lo: lateLo, hi: lateHi });
     if (c.p1q) {
       const who = day.people.find(x => x.name === c.p1q);
-      out.push({ name: c.p1q, kind: "queue", for: blk.phase1 || "", what: "Phase 1", lo: who ? who.start : null, hi: who ? who.start + who.len : null });
+      out.push({ name: c.p1q, kind: "queue", tag: "Covering - Phase 1", for: blk.phase1 || "", what: "Phase 1", lo: who ? who.start : null, hi: who ? who.start + who.len : null });
     }
     anchorGaps(key).forEach(g => {
       const name = gapCover(key, g);
@@ -652,7 +689,7 @@ export function makeEngine(cal, live, nowMs) {
         const bits = [];
         if (nowQ !== usualQ) bits.push("on " + qLabel(nowQ) + " instead of " + qLabel(usualQ));
         if (p.start !== usual.start + shiftOff || p.len !== usual.len) bits.push("working " + span(p.start, p.len) + " instead of their usual " + span(usual.start + shiftOff, usual.len));
-        if (prefix) out.push({ name, kind: "change", label: "Swap", for: "", what: "", text: prefix.replace("swapped with", "swapped shifts with") + (bits.length ? ": " + bits.join(" and ") : ""), lo: p.start, hi: p.start + p.len });
+        if (prefix) out.push({ name, kind: "change", label: "Swap", tag: swapTag(p, key), for: "", what: "", text: prefix.replace("swapped with", "swapped shifts with") + (bits.length ? ": " + bits.join(" and ") : ""), lo: p.start, hi: p.start + p.len });
         else if (bits.length) out.push({ name, kind: "change", label: "Moved", for: "", what: "", text: "is " + bits.join(" and "), lo: p.start, hi: p.start + p.len });
       });
     }
@@ -662,6 +699,7 @@ export function makeEngine(cal, live, nowMs) {
       const tch = new Set(Object.keys((nightEdits(key) || { ovr: {} }).ovr));
       day.people.forEach(p => {
         if (tch.has(p.name)) return;
+        if (blk.late === p.name && lateFree(key)) return;
         if (blk.late === p.name) rotation.push({ name: p.name, label: "Late Shift", lo: p.start, hi: p.start + p.len });
         else if (blk.phase1 === p.name) rotation.push({ name: p.name, label: "Phase 1", lo: p.start, hi: p.start + p.len });
       });
@@ -710,7 +748,8 @@ export function makeEngine(cal, live, nowMs) {
     const range = span(st.start, VIP_LATE_LEN);
     const kindName = { vip: "VIP", phase1: "Phase 1" };
     st.missing.forEach(kind => {
-      const who = st.absent.length ? " " + st.absent.join(", ") + (st.absent.length === 1 ? " is" : " are") + " off." : "";
+      const off = st.absent.filter(n => { const pp = day.people.find(x => x.name === n); return pp && rolesOf(pp)[kind]; });
+      const who = off.length ? " " + off.join(", ") + (off.length === 1 ? " is" : " are") + " off." : "";
       out.push({ kind: "late", text: "Late shift " + range + " needs a " + kindName[kind] + " person." + who });
     });
     anchorGaps(key).forEach(g => {
@@ -752,7 +791,7 @@ export function makeEngine(cal, live, nowMs) {
     return out;
   }
 
-  return { roster, nightEdits, rolesOf, barsSig, resolveDay, coveringFor, needsCover, vipBlockFor, awayMark, sickOn, lateCoverFor, changesFor, anchorGaps, gapCover, anchorCoverFor, lateStartFor };
+  return { roster, lateReleased, lateFree, rosterUsual, nightEdits, rolesOf, barsSig, resolveDay, coveringFor, needsCover, vipBlockFor, awayMark, sickOn, lateCoverFor, changesFor, anchorGaps, gapCover, anchorCoverFor, lateStartFor };
 }
 
 // ---------------------------------------------------------------------------------------------------------------- the day for the API
@@ -761,6 +800,7 @@ function coverEntry(key, e) {
   const out = { kind: e.kind, name: e.name, for: e.for || null, what: e.what || null, text };
   if (e.extra) out.extra = e.extra;
   if (e.label) out.label = e.label;
+  if (e.tag) out.tag = e.tag;
   if (Number.isFinite(e.lo) && Number.isFinite(e.hi)) {
     out.from = slotLabel(e.lo);
     out.to = slotLabel(e.hi);

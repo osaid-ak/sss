@@ -36,6 +36,7 @@
           "name": { "type": "string", "description": "who takes over" },
           "from": { "type": "string", "description": "whose shift and queue they take" },
           "shift": { "type": "string", "description": "only when the shift is not the other person's own that night: late, a clock (6pm, 10.30) or hours (7pm-4am)" },
+          "release": { "type": "boolean", "description": "true for \"replaces\": the covered person goes back to their usual hours (when they are working). Leave it out for plain \"covers\"." },
           "dates": { "type": "string" }
         },
         "required": ["op", "name", "from", "dates"],
@@ -47,7 +48,7 @@
           "op": { "const": "move" },
           "name": { "type": "string" },
           "queue": { "enum": ["phase1", "vip", "both"] },
-          "shift": { "type": "string", "description": "late, a clock (10.30, 6pm) or hours (7pm-4am)" },
+          "shift": { "type": "string", "description": "late, a clock (10.30, 6pm), hours (7pm-4am), or usual (also original, own: the person's own roster hours; queue and roles stay)" },
           "dates": { "type": "string" }
         },
         "required": ["op", "name", "dates"],

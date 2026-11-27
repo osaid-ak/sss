@@ -201,6 +201,16 @@ for (let i = 0; i < Math.max(8, Math.floor(runs / 6)); i++) {
   if (JSON.stringify(p.line) !== JSON.stringify(w.line) || JSON.stringify(p.hours) !== JSON.stringify(w.hours)) bad.push("sheet: the page and the worker read the Phase 1 / Support Line tab differently page=" + JSON.stringify(p.line[1]) + " worker=" + JSON.stringify(w.line[1]));
   if (!p.line[1] || p.line[1].breaks.Zunair !== 12) bad.push("sheet: break rotation not read: " + JSON.stringify(p.line[1]));
 }
+{
+  // a save round-trips through the page's sanitizer: "usual hours" shifts and a takeover's release must survive it (they would silently vanish otherwise)
+  const pg = loadPage(NOW);
+  const raw = JSON.parse(JSON.stringify(pg.data));
+  raw.changes = { "2026-12-01": [{ id: "a", type: "shift", name: "Ivan", shift: { kind: "usual" } }, { id: "b", type: "takeover", name: "Ammana", from: "Zarminay", release: true }, { id: "c", type: "takeover", name: "Ayeshah", from: "Ivan", shift: { kind: "usual" } }] };
+  const out = (pg.sanitizeData(raw).changes || {})["2026-12-01"] || [];
+  totals.sanitize = 1;
+  if (!(out[0] && out[0].shift && out[0].shift.kind === "usual")) bad.push("sanitize: a shift of kind usual was dropped");
+  if (!(out[1] && out[1].release === true)) bad.push("sanitize: a takeover's release was dropped");
+}
 totals.mismatches = bad.length;
 console.log("compare:", JSON.stringify(totals));
 if (bad.length) { console.log(bad.slice(0, 8).join("\n")); process.exit(1); }
